@@ -31,8 +31,11 @@ import {
   uid,
 } from "@/lib/store";
 import { renderAll } from "@/lib/render";
-import { generateCopy, generateIdeas } from "@/lib/ai";
+import { generateCopy, generateIdeas, generateHooks } from "@/lib/ai";
 import { readWebsite } from "@/lib/website";
+import { photoFont } from "@/lib/photo-render";
+import { photoSlide } from "@/lib/photo-layout";
+import { slideAssetIds, templateSlide } from "@/lib/format-template";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
@@ -105,9 +108,40 @@ export async function POST(req: NextRequest) {
     }
     if (action === "format") {
       const data = formatSchema.parse(input.data);
+      if (data.brandId) get<Brand>("brand", data.brandId);
       const item = { ...data, id: data.id || uid() };
       put("format", item);
       return NextResponse.json(item);
+    }
+    if (action === "hooks") {
+      const args = z
+        .object({
+          brandId: z.string(),
+          format: formatSchema,
+          prompt: z.string().trim().max(2000).default(""),
+          url: z.string().max(2000).optional(),
+        })
+        .parse(input);
+      const brand = get<Brand>("brand", args.brandId);
+      if ((args.format.hooks?.length ?? 0) > 190)
+        throw new StudioError(
+          "Keep at most 190 existing hooks before generating ten more.",
+        );
+      if (!process.env.OPENAI_API_KEY)
+        throw new StudioError(
+          "Add OPENAI_API_KEY in .env.local and restart to generate hooks.",
+          412,
+        );
+      const source = args.prompt
+        ? undefined
+        : await readWebsite(args.url?.trim() || brand.destination);
+      const hooks = await generateHooks(
+        brand,
+        { ...args.format, id: args.format.id || "" },
+        args.prompt,
+        source,
+      );
+      return NextResponse.json({ hooks });
     }
     if (action === "ideas") {
       const args = z
@@ -129,7 +163,7 @@ export async function POST(req: NextRequest) {
       get<Brand>("brand", content.brandId);
       get<Format>("format", content.formatId);
       content.slides.forEach((s) => {
-        if (s.assetId) get<Asset>("asset", s.assetId);
+        slideAssetIds(s).forEach((id) => get<Asset>("asset", id));
       });
       return NextResponse.json(
         savePost(
@@ -150,6 +184,7 @@ export async function POST(req: NextRequest) {
           mode: z.enum(["manual", "ai"]),
           collection: z.string().optional(),
           slideCount: z.number().int().min(2).max(10).optional(),
+          selectedHook: z.string().trim().min(1).max(180).optional(),
         })
         .parse(input);
       const brand = get<Brand>("brand", args.brandId),
@@ -165,6 +200,7 @@ export async function POST(req: NextRequest) {
                 .slice(0, 20)
                 .map((p) => p.slides[0].title),
               slideCount,
+              args.selectedHook,
             )
           : {
               title: args.topic.slice(0, 160),
@@ -173,7 +209,7 @@ export async function POST(req: NextRequest) {
               slides: Array.from({ length: slideCount }, (_, i) => ({
                 title:
                   i === 0
-                    ? args.topic.slice(0, 180)
+                    ? args.selectedHook || args.topic.slice(0, 180)
                     : i === slideCount - 1
                       ? "What will you try next?"
                       : `Your idea ${i}`,
@@ -183,7 +219,7 @@ export async function POST(req: NextRequest) {
       const assets = args.collection
         ? list<Asset>("asset").filter((a) => a.collection === args.collection)
         : [];
-      const post = savePost({
+      const postContent = {
         title: copy.title,
         topic: args.topic,
         brandId: brand.id,
@@ -209,7 +245,28 @@ export async function POST(req: NextRequest) {
           fontSize: 82,
           overlay: 0.4,
         })),
-      });
+      } satisfies import("@/lib/schema").PostContent;
+      if (format.design === "photo" || format.font === "tiktok") {
+        const [font, semibold, regular] = await Promise.all([
+          photoFont(),
+          photoFont("semibold"),
+          photoFont("regular"),
+        ]);
+        const allAssets = list<Asset>("asset");
+        postContent.slides = postContent.slides.map((slide, index) =>
+          format.templates
+            ? templateSlide(
+                slide,
+                format,
+                { default: font, semibold, regular },
+                allAssets,
+                index,
+                args.collection,
+              )
+            : photoSlide(slide, format.aspect, font),
+        ) as typeof postContent.slides;
+      }
+      const post = savePost(postContent);
       return NextResponse.json(post);
     }
     const id = z.string().parse(input.id);

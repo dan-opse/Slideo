@@ -1,17 +1,15 @@
 "use client";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import dynamic from "next/dynamic";
+const SlideshowEditor = dynamic(() => import("./slideshow-editor"), {
+  ssr: false,
+});
+const FormatDashboard = dynamic(() => import("./format-dashboard"), {
+  ssr: false,
+});
 import {
-  ArrowDown,
-  ArrowLeft,
   ArrowRight,
-  ArrowUp,
   ArrowUpRight,
   BarChart3,
   CalendarDays,
@@ -20,7 +18,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Copy,
+  Clock3,
   Download,
   FileText,
   FolderOpen,
@@ -29,29 +27,17 @@ import {
   Leaf,
   LayoutDashboard,
   Loader2,
-  MoreHorizontal,
   Plus,
   Search,
   Settings2,
   ShieldCheck,
   Sparkles,
-  Trash2,
   Upload,
   X,
-  Undo2,
-  Redo2,
-  PanelLeftClose,
   AlertCircle,
 } from "lucide-react";
-import type {
-  Asset,
-  Brand,
-  Format,
-  Post,
-  PostContent,
-  Slide,
-  StudioState,
-} from "@/lib/schema";
+import type { Brand, Format, Post, StudioState } from "@/lib/schema";
+import { PHOTO_RENDER_VERSION } from "@/lib/photo-layout";
 type View =
   | "Overview"
   | "Review queue"
@@ -76,7 +62,8 @@ const statusLabel = {
   published: "Published",
   archived: "Archived",
 };
-const imgUrl = (p: Post, i = 0) => `/api/render/${p.id}/${p.revision}/${i}`;
+const imgUrl = (p: Post, i = 0) =>
+  `/api/render/${p.id}/${p.revision}/${i}${p.slides[i]?.design === "photo" ? `?v=${PHOTO_RENDER_VERSION}` : ""}`;
 const blankBrand = {
   name: "",
   product: "",
@@ -212,24 +199,34 @@ type WebsiteIdea = { topic: string; angle: string };
 
 function CreateSlideshowModal({
   state,
+  initialFormat,
+  initialHook,
   busy,
   onClose,
   onCreate,
   onOpenSettings,
 }: {
   state: StudioState;
+  initialFormat?: Format;
+  initialHook?: string;
   busy: boolean;
   onClose: () => void;
   onCreate: (data: Record<string, unknown>) => Promise<void>;
   onOpenSettings: () => void;
 }) {
-  const firstBrand = state.brands[0];
-  const firstFormat = state.formats[0];
+  const firstBrand =
+    state.brands.find((brand) => brand.id === initialFormat?.brandId) ??
+    state.brands[0];
+  const firstFormat =
+    initialFormat ??
+    state.formats.find((format) => format.design === "photo") ??
+    state.formats[0];
   const clampCount = (count: number) =>
     Math.max(2, Math.min(10, Math.round(count || 2)));
   const [brandId, setBrandId] = useState(firstBrand?.id || "");
   const [formatId, setFormatId] = useState(firstFormat?.id || "");
-  const [topic, setTopic] = useState("");
+  const [topic, setTopic] = useState(initialHook || "");
+  const [selectedHook, setSelectedHook] = useState(initialHook || "");
   const [sourceUrl, setSourceUrl] = useState(firstBrand?.destination || "");
   const [slideCount, setSlideCount] = useState(
     clampCount(firstFormat?.slideCount || 6),
@@ -280,6 +277,7 @@ function CreateSlideshowModal({
             collection,
             mode,
             slideCount,
+            selectedHook: selectedHook || undefined,
           });
         }}
       >
@@ -416,6 +414,7 @@ function CreateSlideshowModal({
               onChange={(event) => {
                 const nextId = event.target.value;
                 setFormatId(nextId);
+                setSelectedHook("");
                 const next = state.formats.find(
                   (format) => format.id === nextId,
                 );
@@ -430,6 +429,31 @@ function CreateSlideshowModal({
             </select>
           </Field>
         </div>
+        {!!state.formats.find((format) => format.id === formatId)?.hooks
+          ?.length && (
+          <Field
+            label="Opening hook"
+            hint="A selected hook is kept exactly as written. Tone & Style applies to the other slides and caption."
+          >
+            <select
+              value={selectedHook}
+              onChange={(event) => {
+                setSelectedHook(event.target.value);
+                if (!topic || topic === selectedHook)
+                  setTopic(event.target.value);
+              }}
+            >
+              <option value="">Create a hook from the idea</option>
+              {state.formats
+                .find((format) => format.id === formatId)
+                ?.hooks?.map((hook, index) => (
+                  <option key={`${index}-${hook}`} value={hook}>
+                    {hook}
+                  </option>
+                ))}
+            </select>
+          </Field>
+        )}
         <div className="form-row">
           <Field
             label="Number of slides"
@@ -451,7 +475,7 @@ function CreateSlideshowModal({
               value={collection}
               onChange={(event) => setCollection(event.target.value)}
             >
-              <option value="">Use the format’s solid colors</option>
+              <option value="">Use the format’s image settings</option>
               {[...new Set(state.assets.map((asset) => asset.collection))].map(
                 (name) => (
                   <option key={name}>{name}</option>
@@ -542,7 +566,13 @@ export default function Studio() {
     [search, setSearch] = useState(""),
     [filter, setFilter] = useState("all"),
     [create, setCreate] = useState(false),
+    [createContext, setCreateContext] = useState<{
+      format: Format;
+      hook?: string;
+    } | null>(null),
     [editing, setEditing] = useState<Post | null>(null),
+    [editDirectly, setEditDirectly] = useState(false),
+    [editorTab, setEditorTab] = useState<"text" | "post">("text"),
     [brandEdit, setBrandEdit] = useState<Partial<Brand> | null>(null),
     [formatEdit, setFormatEdit] = useState<Format | null>(null),
     [upload, setUpload] = useState(false);
@@ -583,7 +613,6 @@ export default function Studio() {
     );
   const visible = state.posts.filter((p) => p.status !== "archived");
   const review = visible.filter((p) => p.status === "needs_review");
-  const approved = visible.filter((p) => p.status === "approved");
   const published = visible.filter((p) => p.status === "published");
   const posts = visible.filter(
     (p) =>
@@ -597,7 +626,10 @@ export default function Studio() {
     setSearch("");
     setError("");
   };
-  const closeCreate = () => setCreate(false);
+  const closeCreate = () => {
+    setCreate(false);
+    setCreateContext(null);
+  };
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -688,7 +720,7 @@ export default function Studio() {
               <div className="eyebrow">YOUR CONTENT, CULTIVATED.</div>
               <h1>
                 {view === "Overview"
-                  ? "Good things start here."
+                  ? "Your slideshows."
                   : view === "Review queue"
                     ? "Ready for your eyes."
                     : view === "Formats"
@@ -727,7 +759,7 @@ export default function Studio() {
                 onClick={() => setCreate(true)}
               >
                 <Plus size={18} />
-                Create slideshow
+                Let’s create a slideshow
               </button>
             )}
             {view === "Assets" && (
@@ -764,120 +796,12 @@ export default function Studio() {
               </button>
             )}
           </div>
-          {view === "Overview" && (
-            <>
-              <section className="intro-grid">
-                <div className="hero-card">
-                  <div className="hero-copy">
-                    <span className="hero-kicker">
-                      <Sparkles size={14} /> LESS BUSYWORK. MORE GOOD IDEAS.
-                    </span>
-                    <h2>
-                      Make something
-                      <br />
-                      <em>worth sharing.</em>
-                    </h2>
-                    <p>
-                      Start with a format. Add your point of view.
-                      <br />
-                      We’ll help you bring it all together.
-                    </p>
-                    <button
-                      className="button dark"
-                      onClick={() => setCreate(true)}
-                    >
-                      Let’s create a slideshow <ArrowUpRight size={17} />
-                    </button>
-                  </div>
-                  <div className="hero-art" aria-hidden="true">
-                    <div className="paper paper-back">
-                      <span>THE REALITY CHECK</span>
-                      <b>
-                        Small steps.
-                        <br />
-                        Real progress.
-                      </b>
-                      <i>04 — MAKE IT YOURS</i>
-                    </div>
-                    <div className="paper paper-front">
-                      <span>FIELD NOTES — VOL. 01</span>
-                      <div className="paper-drawing">
-                        <Leaf size={83} strokeWidth={0.8} />
-                      </div>
-                      <b>
-                        A little space
-                        <br />
-                        for a good idea.
-                      </b>
-                      <i>SWIPE TO EXPLORE →</i>
-                    </div>
-                    <span className="art-star">✳</span>
-                  </div>
-                </div>
-                <div className="readiness-card">
-                  <span className="section-kicker">STUDIO CHECK-IN</span>
-                  <h3>
-                    Your ideas are
-                    <br />
-                    taking shape.
-                  </h3>
-                  <button onClick={() => navigate("Review queue")}>
-                    <span className="stat-icon peach">
-                      <CheckCheck size={20} />
-                    </span>
-                    <span>
-                      <strong>{review.length}</strong>
-                      <small>waiting for your review</small>
-                    </span>
-                    <ArrowUpRight size={17} />
-                  </button>
-                  <button
-                    onClick={() => {
-                      navigate("Overview");
-                      setFilter("approved");
-                    }}
-                  >
-                    <span className="stat-icon sage">
-                      <Download size={20} />
-                    </span>
-                    <span>
-                      <strong>{approved.length}</strong>
-                      <small>approved & ready to export</small>
-                    </span>
-                    <ArrowUpRight size={17} />
-                  </button>
-                  <div className="checkin-footer">
-                    <ShieldCheck size={14} /> You have the final say.
-                  </div>
-                </div>
-              </section>
-              <section className="format-strip">
-                <div>
-                  <Layers3 size={22} />
-                  <span>
-                    <strong>A familiar format. A fresh perspective.</strong>
-                    <small>
-                      Three original starting points for your next idea.
-                    </small>
-                  </span>
-                </div>
-                <button
-                  className="text-button"
-                  onClick={() => navigate("Formats")}
-                >
-                  Explore formats <ArrowRight size={16} />
-                </button>
-              </section>
-            </>
-          )}
           {(view === "Overview" || view === "Review queue") && (
             <section className="posts-section">
               <div className="section-heading">
                 <h2>
-                  {view === "Overview"
-                    ? "Your content garden"
-                    : "The review queue"}{" "}
-                  <span>{posts.length}</span>
+                  {view === "Overview" ? "Slideshows" : "The review queue"}{" "}
+                  <span>({posts.length})</span>
                 </h2>
                 <div className="search-box">
                   <Search size={15} />
@@ -908,10 +832,14 @@ export default function Studio() {
                   ))}
                 </div>
               )}
-              <div className="post-grid">
+              <div className="post-grid photo-gallery">
                 {posts.map((p) => (
-                  <article key={p.id} className="post-card">
-                    <button className="post-art" onClick={() => setEditing(p)}>
+                  <article key={p.id} className="post-card photo-gallery-card">
+                    <button
+                      className="post-art"
+                      aria-label={`Preview ${p.title}`}
+                      onClick={() => setEditing(p)}
+                    >
                       <SlideImage post={p} />
                       <span className="slide-count">
                         <Layers3 size={12} />
@@ -970,7 +898,7 @@ export default function Studio() {
               {state.formats.map((f) => (
                 <article className="format-card" key={f.id}>
                   <button
-                    className="format-preview"
+                    className={`format-preview ${f.font === "tiktok" ? "photo-format" : ""}`}
                     style={{
                       background: f.color,
                       color: f.ink,
@@ -1092,7 +1020,16 @@ export default function Studio() {
               </div>
             ))}
           {view === "Calendar" && (
-            <CalendarView posts={visible} onOpen={setEditing} />
+            <CalendarView
+              posts={visible}
+              brands={state.brands}
+              formats={state.formats}
+              onOpen={(post, editSchedule = false) => {
+                setEditDirectly(editSchedule);
+                setEditorTab(editSchedule ? "post" : "text");
+                setEditing(post);
+              }}
+            />
           )}
           {view === "Results" && (
             <Results
@@ -1186,16 +1123,21 @@ export default function Studio() {
       {create && (
         <CreateSlideshowModal
           state={state}
+          initialFormat={createContext?.format}
+          initialHook={createContext?.hook}
           busy={busy}
           onClose={closeCreate}
           onOpenSettings={() => {
             closeCreate();
+            setFormatEdit(null);
             navigate("Settings");
           }}
           onCreate={(data) =>
             run(async () => {
               const post = await api("create", data);
               setCreate(false);
+              setCreateContext(null);
+              setEditDirectly(true);
               setEditing(post);
               setToast("Your draft is ready.");
             })
@@ -1256,87 +1198,41 @@ export default function Studio() {
         </Modal>
       )}
       {formatEdit && (
-        <Modal
-          title="Make this format yours."
+        <FormatDashboard
+          key={formatEdit.id || "new-format"}
+          initial={formatEdit}
+          state={state}
+          suspended={!!editing || create}
           onClose={() => setFormatEdit(null)}
-        >
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const f = new FormData(e.currentTarget);
-              run(async () => {
-                await api("format", {
-                  data: {
-                    ...Object.fromEntries(f),
-                    id: formatEdit.id || undefined,
-                    slideCount: Number(f.get("slideCount")),
-                  },
-                });
-                setFormatEdit(null);
-                setToast(
-                  "Format saved. Existing posts keep their original design.",
-                );
-              });
-            }}
-          >
-            <Field label="Format name">
-              <input required name="name" defaultValue={formatEdit.name} />
-            </Field>
-            <Field label="Short description">
-              <input name="description" defaultValue={formatEdit.description} />
-            </Field>
-            <Field label="Writing instructions">
-              <textarea
-                name="instructions"
-                rows={3}
-                defaultValue={formatEdit.instructions}
-              />
-            </Field>
-            <div className="form-row">
-              <Field label="Slides">
-                <input
-                  type="number"
-                  name="slideCount"
-                  min={2}
-                  max={10}
-                  defaultValue={formatEdit.slideCount}
-                />
-              </Field>
-              <Field label="Canvas">
-                <select name="aspect" defaultValue={formatEdit.aspect}>
-                  <option value="portrait">4:5 · 1080 × 1350</option>
-                  <option value="story">9:16 · 1080 × 1920</option>
-                </select>
-              </Field>
-            </div>
-            <Field label="Typography">
-              <select name="font" defaultValue={formatEdit.font}>
-                <option value="serif">Editorial serif</option>
-                <option value="sans">Clean sans serif</option>
-              </select>
-            </Field>
-            <div className="form-row colors">
-              {[
-                ["color", "Background"],
-                ["ink", "Text"],
-                ["accent", "Accent"],
-              ].map(([key, label]) => (
-                <Field key={key} label={label}>
-                  <input
-                    type="color"
-                    name={key}
-                    defaultValue={formatEdit[key as keyof Format] as string}
-                  />
-                </Field>
-              ))}
-            </div>
-            <div className="modal-actions">
-              <button className="button primary" disabled={busy}>
-                Save format
-              </button>
-            </div>
-          </form>
-        </Modal>
+          onSave={async (format) => {
+            const saved = await api("format", {
+              data: { ...format, id: format.id || undefined },
+            });
+            await refresh();
+            return saved;
+          }}
+          onOpenPost={(post) => {
+            setEditing(post);
+            setEditDirectly(false);
+            setEditorTab("text");
+          }}
+          onCreate={(format, hook) => {
+            setCreateContext({ format, hook });
+            setCreate(true);
+          }}
+          schedule={(posts) => (
+            <CalendarView
+              posts={posts}
+              brands={state.brands}
+              formats={state.formats}
+              onOpen={(post, editSchedule = false) => {
+                setEditDirectly(editSchedule);
+                setEditorTab(editSchedule ? "post" : "text");
+                setEditing(post);
+              }}
+            />
+          )}
+        />
       )}
       {upload && (
         <Modal
@@ -1418,10 +1314,25 @@ export default function Studio() {
         </Modal>
       )}
       {editing && (
-        <Editor
+        <SlideshowEditor
           initial={editing}
+          startEditing={editDirectly}
+          startTab={editorTab}
+          onFormat={(id) => {
+            setEditing(null);
+            setEditDirectly(false);
+            setEditorTab("text");
+            navigate("Formats");
+            setFormatEdit(
+              state.formats.find((format) => format.id === id) ?? null,
+            );
+          }}
           state={state}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            setEditing(null);
+            setEditDirectly(false);
+            setEditorTab("text");
+          }}
           onSaved={async () => {
             await refresh();
           }}
@@ -1431,761 +1342,26 @@ export default function Studio() {
     </div>
   );
 }
-function Editor({
-  initial,
-  state,
-  onClose,
-  onSaved,
-  onToast,
-}: {
-  initial: Post;
-  state: StudioState;
-  onClose: () => void;
-  onSaved: () => Promise<void>;
-  onToast: (s: string) => void;
-}) {
-  const [post, setPost] = useState(initial),
-    [saved, setSaved] = useState(initial),
-    [selected, setSelected] = useState(0),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState(""),
-    [preview, setPreview] = useState(false),
-    [ready, setReady] = useState(false),
-    [past, setPast] = useState<Post[]>([]),
-    [future, setFuture] = useState<Post[]>([]),
-    [confirming, setConfirming] = useState(false);
-  const dirty = JSON.stringify(post) !== JSON.stringify(saved);
-  const slide = post.slides[selected];
-  const immutable = post.status === "published";
-  const update = (next: Post) => {
-    setPast((p) => [...p.slice(-39), post]);
-    setFuture([]);
-    setPost(next);
-    setReady(false);
-  };
-  const patch = (data: Partial<Slide>) =>
-    update({
-      ...post,
-      slides: post.slides.map((s, i) =>
-        i === selected ? { ...s, ...data } : s,
-      ),
-    });
-  const close = () => {
-    if (dirty) {
-      setConfirming(true);
-      return;
-    }
-    onClose();
-  };
-  useEffect(() => {
-    const prevent = (e: BeforeUnloadEvent) => {
-      if (dirty) e.preventDefault();
-    };
-    window.addEventListener("beforeunload", prevent);
-    return () => window.removeEventListener("beforeunload", prevent);
-  }, [dirty]);
-  const action = async (fn: () => Promise<void>) => {
-    setBusy(true);
-    setError("");
-    try {
-      await fn();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not complete action.");
-    } finally {
-      setBusy(false);
-    }
-  };
-  const save = async () => {
-    if (!dirty) return saved;
-    const result: Post = await api("save", {
-      id: post.id,
-      expected: saved.revision,
-      data: post,
-    });
-    setPost(result);
-    setSaved(result);
-    await onSaved();
-    return result;
-  };
-  const render = () =>
-    action(async () => {
-      const current = await save();
-      await api("render", { id: current.id, revision: current.revision });
-      setPreview(true);
-      setReady(true);
-    });
-  const reorder = (offset: number) => {
-    const next = selected + offset;
-    if (next < 0 || next >= post.slides.length) return;
-    const slides = [...post.slides];
-    [slides[selected], slides[next]] = [slides[next], slides[selected]];
-    update({ ...post, slides });
-    setSelected(next);
-  };
-  const download = () =>
-    action(async () => {
-      const r = await fetch(`/api/export/${saved.id}`);
-      if (!r.ok) throw new Error((await r.json()).error);
-      const url = URL.createObjectURL(await r.blob());
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${saved.title.replace(/[^a-z0-9]+/gi, "-").slice(0, 70)}-v${saved.revision}.zip`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      onToast("Package downloaded. Publish manually when you’re ready.");
-    });
-  return (
-    <div
-      className="editor-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Slideshow editor"
-    >
-      <header className="editor-header">
-        <div>
-          <IconButton label="Close editor" onClick={close}>
-            <ArrowLeft size={20} />
-          </IconButton>
-          <span className="editor-divider" />
-          <div>
-            <strong>{post.title}</strong>
-            <small>
-              {dirty ? "Unsaved changes" : `Saved · revision ${saved.revision}`}{" "}
-              <span
-                className={`status ${dirty ? "needs_review" : post.status}`}
-              >
-                {dirty ? "Needs review" : statusLabel[post.status]}
-              </span>
-            </small>
-          </div>
-        </div>
-        <div className="editor-actions">
-          <IconButton
-            label="Undo"
-            disabled={!past.length || busy || immutable}
-            onClick={() => {
-              const p = past.at(-1)!;
-              setFuture((f) => [post, ...f]);
-              setPost(p);
-              setPast((p) => p.slice(0, -1));
-              setReady(false);
-            }}
-          >
-            <Undo2 size={17} />
-          </IconButton>
-          <IconButton
-            label="Redo"
-            disabled={!future.length || busy || immutable}
-            onClick={() => {
-              setPast((p) => [...p, post]);
-              setPost(future[0]);
-              setFuture((f) => f.slice(1));
-              setReady(false);
-            }}
-          >
-            <Redo2 size={17} />
-          </IconButton>
-          <button
-            className="button secondary"
-            disabled={busy || !dirty}
-            onClick={() =>
-              action(async () => {
-                await save();
-                onToast("Revision saved.");
-              })
-            }
-          >
-            Save changes
-          </button>
-          <button className="button primary" disabled={busy} onClick={render}>
-            {busy ? (
-              <Loader2 className="spin" size={16} />
-            ) : (
-              <ShieldCheck size={16} />
-            )}
-            Review & export
-          </button>
-        </div>
-      </header>
-      {error && (
-        <div className="alert editor-error" role="alert">
-          <AlertCircle size={17} />
-          {error}
-        </div>
-      )}
-      <div className="editor-body">
-        <aside className="slide-rail">
-          <div className="rail-heading">
-            <span>YOUR SLIDES</span>
-            <b>{post.slides.length}</b>
-          </div>
-          <div className="slide-thumbnails">
-            {post.slides.map((s, i) => (
-              <button
-                key={s.id}
-                className={`slide-thumb ${selected === i ? "selected" : ""}`}
-                onClick={() => setSelected(i)}
-              >
-                <span>{String(i + 1).padStart(2, "0")}</span>
-                <div
-                  style={{
-                    background: s.background,
-                    color: s.ink,
-                    fontFamily: s.font === "serif" ? "Georgia" : "Helvetica",
-                  }}
-                >
-                  <b>{s.title || "Your heading"}</b>
-                </div>
-                <small>{s.role}</small>
-              </button>
-            ))}
-          </div>
-          <button
-            className="button secondary add-slide"
-            disabled={immutable || post.slides.length >= 10 || busy}
-            onClick={() => {
-              update({
-                ...post,
-                slides: [
-                  ...post.slides,
-                  {
-                    ...slide,
-                    id: crypto.randomUUID(),
-                    role: "body",
-                    title: "A fresh perspective",
-                    body: "",
-                  },
-                ],
-              });
-              setSelected(post.slides.length);
-            }}
-          >
-            <Plus size={15} />
-            Add slide
-          </button>
-        </aside>
-        <section className="canvas-area">
-          <div className="canvas-toolbar">
-            <span>{preview ? "FINAL RENDER" : "LAYOUT DRAFT"}</span>
-            <div className="segmented">
-              <button
-                className={!preview ? "selected" : ""}
-                onClick={() => setPreview(false)}
-              >
-                Edit
-              </button>
-              <button
-                className={preview ? "selected" : ""}
-                disabled={busy}
-                onClick={render}
-              >
-                Final preview
-              </button>
-            </div>
-            <span>
-              {post.aspect === "portrait" ? "1080 × 1350" : "1080 × 1920"}
-            </span>
-          </div>
-          <div className="canvas-wrap">
-            {preview && !dirty ? (
-              <SlideImage
-                post={saved}
-                index={selected}
-                className="editor-canvas"
-              />
-            ) : (
-              <div
-                className="draft-canvas editor-canvas"
-                style={{
-                  aspectRatio: post.aspect === "portrait" ? "4 / 5" : "9 / 16",
-                  background: slide.background,
-                  color: slide.ink,
-                  fontFamily:
-                    slide.font === "serif"
-                      ? "Georgia, serif"
-                      : "Helvetica, sans-serif",
-                }}
-              >
-                {slide.assetId && (
-                  <Image
-                    unoptimized
-                    fill
-                    sizes="480px"
-                    src={`/api/media/${slide.assetId}`}
-                    alt="Selected background"
-                    style={{ objectFit: "cover" }}
-                  />
-                )}
-                {slide.assetId && (
-                  <div
-                    className="draft-overlay"
-                    style={{ background: `rgba(0,0,0,${slide.overlay})` }}
-                  />
-                )}
-                <span
-                  className="draft-accent"
-                  style={{ background: slide.accent }}
-                />
-                <div
-                  className={`draft-copy ${slide.position}`}
-                  style={{ textAlign: slide.align }}
-                >
-                  <h2 style={{ fontSize: `${slide.fontSize / 10.8}cqw` }}>
-                    {slide.title || "Your heading here"}
-                  </h2>
-                  <p>{slide.body}</p>
-                </div>
-                <div className="draft-footer">
-                  <span>{slide.role.toUpperCase()}</span>
-                  <span>
-                    {String(selected + 1).padStart(2, "0")} /{" "}
-                    {String(post.slides.length).padStart(2, "0")}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="canvas-nav">
-            <IconButton
-              label="Previous slide"
-              disabled={selected === 0}
-              onClick={() => setSelected((i) => i - 1)}
-            >
-              <ChevronLeft size={18} />
-            </IconButton>
-            <span>
-              Slide {selected + 1} of {post.slides.length}
-            </span>
-            <IconButton
-              label="Next slide"
-              disabled={selected === post.slides.length - 1}
-              onClick={() => setSelected((i) => i + 1)}
-            >
-              <ChevronRight size={18} />
-            </IconButton>
-          </div>
-          <p className="canvas-help">
-            {preview
-              ? "This is the exact JPEG used in your export."
-              : "Layout draft · render the final preview to check exact text placement."}
-          </p>
-        </section>
-        <aside className="inspector">
-          <div className="inspector-heading">
-            <h3>The details</h3>
-            <Settings2 size={17} />
-          </div>
-          <fieldset disabled={busy || immutable}>
-            <Field label="Post title">
-              <input
-                value={post.title}
-                maxLength={160}
-                onChange={(e) => update({ ...post, title: e.target.value })}
-              />
-            </Field>
-            <div className="inspector-section">
-              <div className="section-label">
-                SLIDE {selected + 1}
-                <div>
-                  <IconButton
-                    label="Move slide earlier"
-                    onClick={() => reorder(-1)}
-                    disabled={selected === 0}
-                  >
-                    <ArrowUp size={14} />
-                  </IconButton>
-                  <IconButton
-                    label="Move slide later"
-                    onClick={() => reorder(1)}
-                    disabled={selected === post.slides.length - 1}
-                  >
-                    <ArrowDown size={14} />
-                  </IconButton>
-                  <IconButton
-                    label="Delete slide"
-                    disabled={post.slides.length === 1}
-                    onClick={() => {
-                      update({
-                        ...post,
-                        slides: post.slides.filter((_, i) => i !== selected),
-                      });
-                      setSelected(Math.max(0, selected - 1));
-                    }}
-                  >
-                    <Trash2 size={14} />
-                  </IconButton>
-                </div>
-              </div>
-              <Field label="Role">
-                <select
-                  value={slide.role}
-                  onChange={(e) =>
-                    patch({ role: e.target.value as Slide["role"] })
-                  }
-                >
-                  <option value="hook">Hook</option>
-                  <option value="body">Body</option>
-                  <option value="cta">Call to action</option>
-                </select>
-              </Field>
-              <Field label="Heading">
-                <textarea
-                  rows={3}
-                  maxLength={180}
-                  value={slide.title}
-                  onChange={(e) => patch({ title: e.target.value })}
-                />
-              </Field>
-              <Field label="Supporting copy">
-                <textarea
-                  rows={4}
-                  maxLength={450}
-                  value={slide.body}
-                  onChange={(e) => patch({ body: e.target.value })}
-                />
-              </Field>
-              <div className="form-row">
-                <Field label="Typography">
-                  <select
-                    value={slide.font}
-                    onChange={(e) =>
-                      patch({ font: e.target.value as Slide["font"] })
-                    }
-                  >
-                    <option value="serif">Serif</option>
-                    <option value="sans">Sans</option>
-                  </select>
-                </Field>
-                <Field label="Heading size">
-                  <input
-                    type="number"
-                    min={40}
-                    max={110}
-                    value={slide.fontSize}
-                    onChange={(e) =>
-                      patch({ fontSize: Number(e.target.value) })
-                    }
-                  />
-                </Field>
-              </div>
-              <div className="form-row">
-                <Field label="Text align">
-                  <select
-                    value={slide.align}
-                    onChange={(e) =>
-                      patch({ align: e.target.value as Slide["align"] })
-                    }
-                  >
-                    <option value="left">Left</option>
-                    <option value="center">Center</option>
-                  </select>
-                </Field>
-                <Field label="Position">
-                  <select
-                    value={slide.position}
-                    onChange={(e) =>
-                      patch({ position: e.target.value as Slide["position"] })
-                    }
-                  >
-                    <option value="top">Top</option>
-                    <option value="center">Center</option>
-                    <option value="bottom">Bottom</option>
-                  </select>
-                </Field>
-              </div>
-              <div className="form-row colors">
-                {(["background", "ink", "accent"] as const).map((k) => (
-                  <Field
-                    key={k}
-                    label={
-                      k === "ink"
-                        ? "Text"
-                        : k.charAt(0).toUpperCase() + k.slice(1)
-                    }
-                  >
-                    <input
-                      type="color"
-                      value={slide[k]}
-                      onChange={(e) => patch({ [k]: e.target.value })}
-                    />
-                  </Field>
-                ))}
-              </div>
-              <Field label="Background image">
-                <select
-                  value={slide.assetId || ""}
-                  onChange={(e) => patch({ assetId: e.target.value || null })}
-                >
-                  <option value="">Solid color</option>
-                  {state.assets.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              {slide.assetId && (
-                <Field
-                  label={`Dark overlay · ${Math.round(slide.overlay * 100)}%`}
-                >
-                  <input
-                    type="range"
-                    min={0}
-                    max={0.85}
-                    step={0.05}
-                    value={slide.overlay}
-                    onChange={(e) => patch({ overlay: Number(e.target.value) })}
-                  />
-                </Field>
-              )}
-            </div>
-            <div className="inspector-section">
-              <span className="section-label">POST DETAILS</span>
-              <Field label="Canvas">
-                <select
-                  value={post.aspect}
-                  onChange={(e) =>
-                    update({
-                      ...post,
-                      aspect: e.target.value as Post["aspect"],
-                    })
-                  }
-                >
-                  <option value="portrait">4:5 · Portrait</option>
-                  <option value="story">9:16 · Full height</option>
-                </select>
-              </Field>
-              <Field label="Caption">
-                <textarea
-                  rows={4}
-                  maxLength={2200}
-                  value={post.caption}
-                  onChange={(e) => update({ ...post, caption: e.target.value })}
-                />
-              </Field>
-              <Field label="Target account">
-                <input
-                  placeholder="@youraccount"
-                  value={post.account}
-                  onChange={(e) => update({ ...post, account: e.target.value })}
-                />
-              </Field>
-              <Field
-                label="Planned posting time"
-                hint="Your computer’s local timezone. This does not schedule publication."
-              >
-                <input
-                  type="datetime-local"
-                  value={post.plannedAt ? localDateInput(post.plannedAt) : ""}
-                  onChange={(e) =>
-                    update({
-                      ...post,
-                      plannedAt: e.target.value
-                        ? new Date(e.target.value).toISOString()
-                        : "",
-                    })
-                  }
-                />
-              </Field>
-              <Field label="Disclosure / music notes">
-                <textarea
-                  rows={2}
-                  value={post.notes}
-                  maxLength={1000}
-                  onChange={(e) => update({ ...post, notes: e.target.value })}
-                />
-              </Field>
-            </div>
-          </fieldset>
-          <button
-            className="button secondary full"
-            disabled={busy}
-            onClick={() =>
-              action(async () => {
-                await api("duplicate", { id: saved.id });
-                await onSaved();
-                onToast("A new copy is in your content garden.");
-              })
-            }
-          >
-            <Copy size={15} />
-            Duplicate post
-          </button>
-          <button
-            className="text-button archive"
-            disabled={busy}
-            onClick={() =>
-              action(async () => {
-                await api("archive", { id: post.id });
-                await onSaved();
-                onClose();
-              })
-            }
-          >
-            Archive post
-          </button>
-        </aside>
-      </div>
-      {preview && ready && !dirty && (
-        <div className="review-bar">
-          <div>
-            <ShieldCheck size={23} />
-            <span>
-              <strong>
-                {post.status === "approved" || post.status === "published"
-                  ? "This revision is approved."
-                  : "Give it one final look."}
-              </strong>
-              <small>
-                {post.slides.length} slides ·{" "}
-                {post.account || "No account label"} ·{" "}
-                {post.plannedAt
-                  ? new Date(post.plannedAt).toLocaleString()
-                  : "No planned date"}
-                {post.flags.length
-                  ? ` · ${post.flags.length} quality flags`
-                  : ""}
-              </small>
-            </span>
-          </div>
-          <div>
-            <button
-              className="button secondary"
-              onClick={() =>
-                action(async () => {
-                  await navigator.clipboard.writeText(post.caption);
-                  onToast("Caption copied.");
-                })
-              }
-            >
-              Copy caption
-            </button>
-            {post.status === "approved" || post.status === "published" ? (
-              <>
-                <button
-                  className="button primary"
-                  disabled={busy}
-                  onClick={download}
-                >
-                  <Download size={17} />
-                  Download package
-                </button>
-                {post.status === "approved" && (
-                  <button
-                    className="button secondary"
-                    onClick={() => setConfirming(true)}
-                  >
-                    Record published post
-                  </button>
-                )}
-              </>
-            ) : (
-              <button
-                className="button primary"
-                disabled={busy}
-                onClick={() =>
-                  action(async () => {
-                    const updated = await api("approve", {
-                      id: post.id,
-                      revision: post.revision,
-                    });
-                    setPost(updated);
-                    setSaved(updated);
-                    await onSaved();
-                    onToast("Approved for manual export.");
-                  })
-                }
-              >
-                <Check size={17} />
-                Approve this export
-              </button>
-            )}
-          </div>
-          {post.flags.length > 0 && (
-            <p className="review-flags">{post.flags.join(" · ")}</p>
-          )}
-        </div>
-      )}
-      {confirming &&
-        (dirty ? (
-          <Modal
-            title="Keep your changes?"
-            onClose={() => setConfirming(false)}
-          >
-            <p>You have edits that haven’t been saved.</p>
-            <div className="modal-actions">
-              <button className="button secondary" onClick={onClose}>
-                Discard changes
-              </button>
-              <button
-                className="button primary"
-                disabled={busy}
-                onClick={() =>
-                  action(async () => {
-                    await save();
-                    onClose();
-                  })
-                }
-              >
-                Save & close
-              </button>
-            </div>
-          </Modal>
-        ) : (
-          <Modal
-            title="Record your published post."
-            subtitle="Publish the package in TikTok first, then paste its URL here."
-            onClose={() => setConfirming(false)}
-          >
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const f = new FormData(e.currentTarget);
-                action(async () => {
-                  const updated = await api("publish", {
-                    id: post.id,
-                    url: f.get("url"),
-                  });
-                  setPost(updated);
-                  setSaved(updated);
-                  setConfirming(false);
-                  await onSaved();
-                  onToast("Publication recorded as owner-confirmed.");
-                });
-              }}
-            >
-              <Field label="TikTok post URL">
-                <input
-                  type="url"
-                  name="url"
-                  required
-                  placeholder="https://www.tiktok.com/@you/photo/…"
-                />
-              </Field>
-              <div className="modal-actions">
-                <button className="button primary" disabled={busy}>
-                  Confirm publication
-                </button>
-              </div>
-            </form>
-          </Modal>
-        ))}
-    </div>
-  );
-}
-function localDateInput(value: string) {
-  const d = new Date(value);
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 16);
-}
 function CalendarView({
   posts,
+  brands,
+  formats,
   onOpen,
 }: {
   posts: Post[];
-  onOpen: (p: Post) => void;
+  brands: Brand[];
+  formats: Format[];
+  onOpen: (p: Post, editSchedule?: boolean) => void;
 }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = posts.find((post) => post.id === selectedId);
+  const closeDetails = useCallback(() => setSelectedId(null), []);
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const postingTime = (value: string) =>
+    new Date(value).toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
   const [month, setMonth] = useState(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   );
@@ -2253,10 +1429,22 @@ function CalendarView({
                 d <= days &&
                 posts
                   .filter((p) => p.plannedAt && sameDay(p.plannedAt))
+                  .sort(
+                    (a, b) => Date.parse(a.plannedAt) - Date.parse(b.plannedAt),
+                  )
                   .map((p) => (
-                    <button key={p.id} onClick={() => onOpen(p)}>
-                      <i className={p.status} />
-                      {p.title}
+                    <button
+                      key={p.id}
+                      onClick={() => setSelectedId(p.id)}
+                      aria-label={`View scheduled details for ${p.title}, ${postingTime(p.plannedAt)}`}
+                    >
+                      <time
+                        className="calendar-event-time"
+                        dateTime={p.plannedAt}
+                      >
+                        {postingTime(p.plannedAt)}
+                      </time>
+                      <span className="calendar-event-title">{p.title}</span>
                       <small>{statusLabel[p.status]}</small>
                     </button>
                   ))}
@@ -2265,10 +1453,107 @@ function CalendarView({
         })}
       </div>
       <p className="calendar-note">
-        Dates are shown in {Intl.DateTimeFormat().resolvedOptions().timeZone}.
-        Add a planned time in any slideshow’s Post details. No automatic
-        publishing.
+        Dates and times are shown in {timeZone}. Select a post to view its
+        schedule and details. Publishing is manual.
       </p>
+      {selected && (
+        <Modal title="Scheduled post" onClose={closeDetails} wide>
+          <div className="schedule-details">
+            <div className="schedule-content">
+              <SlideImage post={selected} className="schedule-cover" />
+              <div className="schedule-summary">
+                <span className={`schedule-status ${selected.status}`}>
+                  {statusLabel[selected.status]}
+                </span>
+                <h3>{selected.title}</h3>
+                <div className="schedule-time">
+                  <Clock3 size={21} aria-hidden="true" />
+                  <div>
+                    <span>Planned posting time</span>
+                    <time dateTime={selected.plannedAt}>
+                      <strong>
+                        {new Date(selected.plannedAt).toLocaleDateString(
+                          undefined,
+                          {
+                            weekday: "long",
+                            month: "long",
+                            day: "numeric",
+                            year: "numeric",
+                          },
+                        )}
+                      </strong>
+                      <b>{postingTime(selected.plannedAt)}</b>
+                    </time>
+                    <small>{timeZone}</small>
+                  </div>
+                </div>
+                <dl className="schedule-facts">
+                  <div>
+                    <dt>Target account</dt>
+                    <dd>{selected.account.trim() || "Not set"}</dd>
+                  </div>
+                  <div>
+                    <dt>Brand</dt>
+                    <dd>
+                      {brands.find((brand) => brand.id === selected.brandId)
+                        ?.name || "Not set"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Format</dt>
+                    <dd>
+                      {formats.find((format) => format.id === selected.formatId)
+                        ?.name || "Not set"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Slideshow</dt>
+                    <dd>
+                      {selected.slides.length} slides ·{" "}
+                      {selected.aspect === "story" ? "9:16" : "4:5"}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            </div>
+            <section className="schedule-copy">
+              <h3>Caption</h3>
+              <p>{selected.caption.trim() || "No caption added."}</p>
+            </section>
+            <section className="schedule-copy">
+              <h3>Disclosure / music notes</h3>
+              <p>{selected.notes.trim() || "No notes added."}</p>
+            </section>
+            <p className="schedule-delivery">
+              {selected.status === "published"
+                ? "This post has been marked as published. The time above is its original planned posting time."
+                : "Publish manually at the planned time after approving your slideshow."}
+            </p>
+            <div className="modal-actions schedule-actions">
+              {selected.status !== "published" && (
+                <button
+                  className="button secondary"
+                  onClick={() => {
+                    closeDetails();
+                    onOpen(selected, true);
+                  }}
+                >
+                  <CalendarDays size={16} /> Edit schedule
+                </button>
+              )}
+              <button
+                className="button primary"
+                onClick={() => {
+                  closeDetails();
+                  onOpen(selected);
+                }}
+              >
+                View slideshow <ArrowRight size={16} />
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </section>
   );
 }

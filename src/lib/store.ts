@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { slideAssetIds } from "./format-template";
 import type {
   Asset,
   Brand,
@@ -153,7 +154,11 @@ export function approvePost(id: string, revision: number, hashes: string[]) {
     for (const slide of post.slides) {
       if (!slide.title.trim())
         throw new StudioError("Every slide needs a heading before approval.");
-      if (slide.assetId && !get<Asset>("asset", slide.assetId).rights.trim())
+      if (
+        slideAssetIds(slide).some(
+          (id) => !get<Asset>("asset", id).rights.trim(),
+        )
+      )
         throw new StudioError(
           "Record usage rights for every background before approval.",
         );
@@ -346,3 +351,22 @@ function seed() {
   });
 }
 seed();
+// Add the new preset once without changing existing formats or approved posts.
+if (!list<Format>("format").some((format) => format.id === "tiktok-photo")) {
+  put("format", {
+    id: "tiktok-photo",
+    name: "TikTok photo story",
+    description:
+      "Full-height photos with centered, white TikTok text and a black outline.",
+    instructions:
+      "Write a concise hook and one short thought per slide. Use 8–20 words per slide, with at most two short paragraphs. Keep body copy empty when the heading tells the whole story. Use only verified brand facts, never invented personal results.",
+    color: "#000000",
+    ink: "#ffffff",
+    accent: "#ffffff",
+    aspect: "story",
+    font: "tiktok",
+    design: "photo",
+    slideCount: 6,
+  } satisfies Format);
+  audit("format.tiktok_photo_added", "tiktok-photo");
+}

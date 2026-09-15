@@ -1,5 +1,20 @@
 import { z } from "zod";
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+// Photo-editor coordinates use a 240-unit canvas, scaled to 1080px on export.
+export const photoTextSchema = z.object({
+  id: z.string(),
+  text: z.string().max(630),
+  font: z.enum(["default", "semibold", "regular"]),
+  size: z.number().min(6).max(48),
+  color,
+  style: z.enum(["outline", "plain", "shadow", "box"]),
+  align: z.enum(["left", "center", "right"]),
+  x: z.number().min(0).max(240),
+  y: z.number().min(0).max(427),
+  width: z.number().min(20).max(240),
+  height: z.number().min(12).max(427),
+});
+export type PhotoText = z.infer<typeof photoTextSchema>;
 export const brandSchema = z.object({
   id: z.string().optional(),
   name: z.string().trim().min(1).max(80),
@@ -11,6 +26,25 @@ export const brandSchema = z.object({
   destination: z.string().max(500),
 });
 export type Brand = z.infer<typeof brandSchema> & { id: string };
+export const roleTemplateSchema = z.object({
+  collection: z.string().max(80),
+  imageGrid: z.enum(["none", "split", "quad"]),
+  displayText: z.boolean(),
+  overlay: z.number().min(0).max(0.85),
+  font: photoTextSchema.shape.font,
+  color,
+  style: photoTextSchema.shape.style,
+  size: photoTextSchema.shape.size,
+  position: z.enum(["top", "center", "bottom"]),
+  width: z.number().min(20).max(100),
+  align: photoTextSchema.shape.align,
+  imageFit: z.enum(["cover", "contain"]),
+  imageZoom: z.number().min(1).max(3),
+  imageX: z.number().min(0).max(100),
+  imageY: z.number().min(0).max(100),
+  direction: z.string().max(2000),
+});
+export type RoleTemplate = z.infer<typeof roleTemplateSchema>;
 export const formatSchema = z.object({
   id: z.string().optional(),
   name: z.string().trim().min(1).max(80),
@@ -20,8 +54,23 @@ export const formatSchema = z.object({
   ink: color,
   accent: color,
   aspect: z.enum(["portrait", "story"]),
-  font: z.enum(["serif", "sans"]),
+  font: z.enum(["serif", "sans", "tiktok"]),
+  design: z.enum(["editorial", "photo"]).optional(),
   slideCount: z.number().int().min(2).max(10),
+  brandId: z.string().optional(),
+  websiteUrl: z.string().max(2000).optional(),
+  hooks: z.array(z.string().trim().min(1).max(180)).max(200).optional(),
+  tonePreset: z
+    .enum(["custom", "conversational", "educational", "story", "concise"])
+    .optional(),
+  toneInstructions: z.string().max(8000).optional(),
+  templates: z
+    .object({
+      hook: roleTemplateSchema,
+      body: roleTemplateSchema,
+      cta: roleTemplateSchema,
+    })
+    .optional(),
 });
 export type Format = z.infer<typeof formatSchema> & { id: string };
 export const slideSchema = z.object({
@@ -30,10 +79,18 @@ export const slideSchema = z.object({
   title: z.string().max(180),
   body: z.string().max(450),
   assetId: z.string().nullable(),
+  imageGrid: z.enum(["none", "split", "quad"]).optional(),
+  additionalAssetIds: z.array(z.string()).max(3).optional(),
   background: color,
   ink: color,
   accent: color,
-  font: z.enum(["serif", "sans"]),
+  font: z.enum(["serif", "sans", "tiktok"]),
+  design: z.enum(["editorial", "photo"]).optional(),
+  textLayers: z.array(photoTextSchema).max(12).optional(),
+  imageFit: z.enum(["cover", "contain"]).optional(),
+  imageZoom: z.number().min(1).max(3).optional(),
+  imageX: z.number().min(0).max(100).optional(),
+  imageY: z.number().min(0).max(100).optional(),
   align: z.enum(["left", "center"]),
   position: z.enum(["top", "center", "bottom"]),
   fontSize: z.number().int().min(40).max(110),

@@ -6,10 +6,10 @@ Fieldwork is a private, local slideshow studio inspired by ReelFarm's core workf
 
 ```bash
 npm install
-npm run dev -- --port 3210
+npm run dev
 ```
 
-Open [http://127.0.0.1:3210](http://127.0.0.1:3210). The server binds to loopback and API routes reject non-local hosts and cross-origin requests.
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000), or the port printed in your terminal if 3000 is occupied. The server binds to loopback and API routes reject non-local hosts and cross-origin requests.
 
 The app works without an AI provider. To enable website ideas and AI writing, copy `.env.example` to `.env.local`, set `OPENAI_API_KEY`, and restart the server. `OPENAI_MODEL` defaults to `gpt-5.6-luna` and can be overridden. API keys stay on the server.
 
@@ -23,6 +23,28 @@ The app works without an AI provider. To enable website ideas and AI writing, co
 6. Download the ZIP, publish it manually in TikTok, and record the public URL and metrics.
 
 Edits after approval create a new revision and revoke approval. A ZIP cannot be downloaded until its current render is approved.
+
+## Format dashboards
+
+Select a format to open its dashboard. **Overview** shows slideshows made with that format; **Schedule** shows its planned posts and their posting details. **Settings** contains the original name, description, writing instructions, slide count, canvas, typography, and color defaults.
+
+**Slideshow Format** has separate Hook, Content, and CTA templates with a live preview. Choose image collections, single/stacked/four-image layouts, darkening, text visibility, font, color, style, size, position, width, and content direction. Advanced image controls adjust fit, zoom, and position. New drafts snapshot these settings; existing posts and approvals are preserved. A creation-modal slide count or image collection overrides the format default.
+
+**Hooks & Style → Hooks** stores one opening hook per line. **Generate 10 more** accepts an optional prompt. With no prompt, the server reads the supplied website (prefilled from the brand) for context. Generation uses the existing OpenAI configuration and daily attempt limit; review and save the returned hooks before using them. Choose a saved opening hook in the creation modal to preserve it verbatim.
+
+**Tone & Style** controls only the slide text after the opening hook and the caption. It is excluded from the separate hook-generation request. The Hook template’s content direction can guide hook generation; Content and CTA directions guide their respective slide text. Brand facts and prohibited claims still apply.
+
+## Photo slideshow editor
+
+The **TikTok photo story** preset creates 9:16 slides with locally bundled TikTok Sans, centered white text, and a black outline. Reference defaults are size 14, width 208, height 34, X 16, Y 197 on a 240-unit canvas (scaled 4.5× to a 1080px export). Longer copy gets a taller, centered box; you can edit every value.
+
+Click a gallery cover to preview the slideshow, then **Edit slideshow**. The Text tab supports multiple text boxes, font weights, size, colors, outline/plain/shadow/background styles, alignment, dimensions, and X/Y coordinates. Drag text to move it or use its bottom-right handle to resize. Undo/redo tracks edits. Grid, shrink, and zoom affect the editing workspace only.
+
+The Image tab controls uploaded background images, fill/crop or fit/letterbox, image zoom and positioning, darkening, and background color. Upload your own photos in Assets; the reference screenshots are design references and are not added to the image library.
+
+Browser and JPEG rendering share the same TikTok font outlines and layout calculations. Text overflow is flagged before export. Existing editorial posts retain their revisions and can be edited or converted using **Apply TikTok style to all slides**. Queue dates are planning reminders; TikTok publishing remains manual.
+
+TikTok Sans v4.000 is from [TikTok’s official font repository](https://github.com/tiktok/TikTokSans), under the SIL Open Font License included at `public/fonts/OFL-TikTokSans.txt`.
 
 ## Data and backups
 

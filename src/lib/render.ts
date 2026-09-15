@@ -3,6 +3,8 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { dataDir, digest, get, revisionContent, StudioError } from "./store";
 import type { Asset } from "./schema";
+import { renderPhotoSlide } from "./photo-render";
+import { PHOTO_RENDER_VERSION } from "./photo-layout";
 const escape = (s: string) =>
   s.replace(
     /[&<>"']/g,
@@ -26,11 +28,17 @@ export async function renderSlide(
   const file = path.join(
     dataDir,
     "renders",
-    `${postId}-${revision}-${index}.jpg`,
+    `${postId}-${revision}-${index}${s.design === "photo" ? `-photo-v${PHOTO_RENDER_VERSION}` : ""}.jpg`,
   );
   try {
     return await readFile(file);
   } catch {}
+  if (s.design === "photo") {
+    const buffer = await renderPhotoSlide(s, content.aspect, index);
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, buffer);
+    return buffer;
+  }
   const width = 1080,
     height = content.aspect === "portrait" ? 1350 : 1920;
   let base: Buffer;
