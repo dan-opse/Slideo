@@ -15,6 +15,11 @@ export const photoTextSchema = z.object({
   height: z.number().min(12).max(427),
 });
 export type PhotoText = z.infer<typeof photoTextSchema>;
+export const assetUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(150),
+  collection: z.string().trim().min(1).max(80),
+  rights: z.string().trim().min(1).max(1000),
+});
 export const brandSchema = z.object({
   id: z.string().optional(),
   name: z.string().trim().min(1).max(80),
@@ -23,7 +28,14 @@ export const brandSchema = z.object({
   tone: z.string().max(300),
   facts: z.string().max(3000),
   prohibited: z.string().max(1000),
-  destination: z.string().max(500),
+  destination: z
+    .string()
+    .trim()
+    .max(500)
+    .refine(
+      (v) => v === "" || (/^https?:\/\//i.test(v) && URL.canParse(v)),
+      "Website must be a full web address starting with https://",
+    ),
 });
 export type Brand = z.infer<typeof brandSchema> & { id: string };
 export const roleTemplateSchema = z.object({
@@ -80,7 +92,16 @@ export const slideSchema = z.object({
   body: z.string().max(450),
   assetId: z.string().nullable(),
   imageGrid: z.enum(["none", "split", "quad"]).optional(),
-  additionalAssetIds: z.array(z.string()).max(3).optional(),
+  // Empty strings mark unused grid slots; nulls from older clients mean the same.
+  additionalAssetIds: z
+    .array(
+      z
+        .string()
+        .nullable()
+        .transform((id) => id ?? ""),
+    )
+    .max(3)
+    .optional(),
   background: color,
   ink: color,
   accent: color,
@@ -109,13 +130,26 @@ export const postSchema = z.object({
     .string()
     .refine(
       (v) => v === "" || !Number.isNaN(Date.parse(v)),
-      "Invalid planned time",
+      "Planned posting time is not a valid date.",
     ),
   notes: z.string().max(1000),
   slides: z.array(slideSchema).min(1).max(20),
   flags: z.array(z.string().max(500)).max(20),
 });
 export type PostContent = z.infer<typeof postSchema>;
+const count = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(Number.MAX_SAFE_INTEGER)
+  .nullable();
+export const metricsSchema = z.object({
+  views: count,
+  likes: count,
+  comments: count,
+  shares: count,
+});
+export type Metrics = z.infer<typeof metricsSchema> & { measuredAt: string };
 export type Post = PostContent & {
   id: string;
   revision: number;
@@ -124,13 +158,9 @@ export type Post = PostContent & {
   updatedAt: string;
   publishedUrl?: string;
   publishedAt?: string;
-  metrics?: {
-    views: number | null;
-    likes: number | null;
-    comments: number | null;
-    shares: number | null;
-    measuredAt: string;
-  };
+  metrics?: Metrics;
+  // Earlier snapshots, oldest first; `metrics` is always the latest.
+  metricsHistory?: Metrics[];
 };
 export type Asset = {
   id: string;
@@ -141,6 +171,8 @@ export type Asset = {
   height: number;
   hash: string;
   createdAt: string;
+  // Removed from the library; the file stays for revisions that still use it.
+  removedAt?: string;
 };
 export type StudioState = {
   brands: Brand[];

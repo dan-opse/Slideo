@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sharp from "sharp";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { guard } from "@/lib/guard";
 import {
+  assetUpdateSchema,
   brandSchema,
   formatSchema,
+  metricsSchema,
   postSchema,
   type Asset,
   type Brand,
@@ -15,7 +17,9 @@ import {
 } from "@/lib/schema";
 import {
   approvePost,
+  archivePost,
   assertApproval,
+  assetInUse,
   audit,
   contentOf,
   dataDir,
@@ -24,6 +28,8 @@ import {
   list,
   now,
   put,
+  remove,
+  restorePost,
   savePost,
   state,
   StudioError,
@@ -31,13 +37,166 @@ import {
   uid,
 } from "@/lib/store";
 import { renderAll } from "@/lib/render";
-import { generateCopy, generateIdeas, generateHooks } from "@/lib/ai";
+import {
+  assertAiAvailable,
+  generateCopy,
+  generateIdeas,
+  generateHooks,
+} from "@/lib/ai";
 import { readWebsite } from "@/lib/website";
 import { photoFont } from "@/lib/photo-render";
 import { photoSlide } from "@/lib/photo-layout";
 import { slideAssetIds, templateSlide } from "@/lib/format-template";
+import { describeIssues } from "@/lib/errors";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const JSON_LIMIT = 250_000;
+const UPLOAD_LIMIT = 22 * 1024 * 1024;
+const MAX_PIXELS = 40_000_000;
+const MAX_METRIC_SNAPSHOTS = 200;
+const TIKTOK_POST_URL = /^https:\/\/((www|m|vm|vt)\.)?tiktok\.com\//i;
+const ACTIONS = new Set([
+  "brand",
+  "format",
+  "asset",
+  "removeAsset",
+  "hooks",
+  "ideas",
+  "save",
+  "create",
+  "duplicate",
+  "render",
+  "approve",
+  "archive",
+  "restore",
+  "publish",
+  "metrics",
+]);
+
+// Counts the bytes actually received, so a chunked request without a
+// Content-Length header cannot exceed the limit either.
+async function readLimited(req: NextRequest, limit: number, message: string) {
+  if (Number(req.headers.get("content-length") || 0) > limit)
+    throw new StudioError(message, 413);
+  if (!req.body) return new Uint8Array();
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel();
+      throw new StudioError(message, 413);
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+async function readJson(req: NextRequest) {
+  const text = new TextDecoder().decode(
+    await readLimited(req, JSON_LIMIT, "Request too large."),
+  );
+  let input: unknown;
+  try {
+    input = JSON.parse(text);
+  } catch {
+    throw new StudioError("The request body is not valid JSON.");
+  }
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw new StudioError("The request body must be a JSON object.");
+  return input as Record<string, unknown>;
+}
+const unreadable = () =>
+  new StudioError("This file is not a readable JPEG, PNG, or WebP image.");
+
+async function upload(req: NextRequest) {
+  const bytes = await readLimited(req, UPLOAD_LIMIT, "Upload limit is 20 MB.");
+  const form = await new Response(bytes, {
+    headers: { "content-type": req.headers.get("content-type") || "" },
+  })
+    .formData()
+    .catch(() => {
+      throw new StudioError("The upload could not be read. Try again.");
+    });
+  const file = form.get("file");
+  if (!(file instanceof File) || file.size > 20 * 1024 * 1024)
+    throw new StudioError("Choose a JPEG, PNG, or WebP under 20 MB.");
+  const rights = String(form.get("rights") || "")
+    .trim()
+    .slice(0, 1000);
+  if (!rights)
+    throw new StudioError(
+      "Record usage rights for these images, for example “Original photos taken by me”.",
+    );
+  const collection =
+    String(form.get("collection") || "")
+      .trim()
+      .slice(0, 80) || "My collection";
+  const input = Buffer.from(await file.arrayBuffer());
+  const meta = await sharp(input, { limitInputPixels: false })
+    .metadata()
+    .catch(() => {
+      throw unreadable();
+    });
+  if (
+    !["jpeg", "png", "webp"].includes(meta.format || "") ||
+    (meta.pages || 1) > 1
+  )
+    throw new StudioError(
+      "Only still JPEG, PNG, and WebP images are supported.",
+    );
+  if ((meta.width ?? 0) * (meta.height ?? 0) > MAX_PIXELS)
+    throw new StudioError(
+      "This image is larger than 40 megapixels. Resize it and upload again.",
+      413,
+    );
+  const { data, info } = await sharp(input, { limitInputPixels: MAX_PIXELS })
+    .rotate()
+    .resize({
+      width: 2400,
+      height: 2400,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .jpeg({ quality: 92 })
+    .toBuffer({ resolveWithObject: true })
+    .catch(() => {
+      throw unreadable();
+    });
+  const hash = digest(data);
+  const existing = list<Asset>("asset").find(
+    (asset) =>
+      asset.hash === hash &&
+      asset.collection === collection &&
+      !asset.removedAt,
+  );
+  if (existing) return { asset: existing, duplicate: true };
+  const asset: Asset = {
+    id: uid(),
+    name: file.name.slice(0, 150),
+    collection,
+    rights,
+    width: info.width,
+    height: info.height,
+    hash,
+    createdAt: now(),
+  };
+  await mkdir(path.join(dataDir, "assets"), { recursive: true });
+  await writeFile(path.join(dataDir, "assets", asset.id + ".jpg"), data);
+  put("asset", asset);
+  audit("asset.uploaded", asset.id);
+  return { asset, duplicate: false };
+}
+
 export async function GET(req: NextRequest) {
   const denied = guard(req);
   if (denied) return denied;
@@ -47,71 +206,50 @@ export async function POST(req: NextRequest) {
   const denied = guard(req);
   if (denied) return denied;
   try {
-    if (req.headers.get("content-type")?.includes("multipart/form-data")) {
-      if (Number(req.headers.get("content-length") || 0) > 22 * 1024 * 1024)
-        throw new StudioError("Upload limit is 20 MB.", 413);
-      const form = await req.formData();
-      const file = form.get("file");
-      if (!(file instanceof File) || file.size > 20 * 1024 * 1024)
-        throw new StudioError("Choose a JPEG, PNG, or WebP under 20 MB.");
-      const input = Buffer.from(await file.arrayBuffer());
-      const meta = await sharp(input, {
-        limitInputPixels: 40_000_000,
-      }).metadata();
-      if (
-        !["jpeg", "png", "webp"].includes(meta.format || "") ||
-        (meta.pages || 1) > 1
-      )
-        throw new StudioError(
-          "Only still JPEG, PNG, and WebP images are supported.",
-        );
-      const { data, info } = await sharp(input, {
-        limitInputPixels: 40_000_000,
-      })
-        .rotate()
-        .resize({
-          width: 2400,
-          height: 2400,
-          fit: "inside",
-          withoutEnlargement: true,
-        })
-        .jpeg({ quality: 92 })
-        .toBuffer({ resolveWithObject: true });
-      const asset: Asset = {
-        id: uid(),
-        name: file.name.slice(0, 150),
-        collection: String(form.get("collection") || "My collection").slice(
-          0,
-          80,
-        ),
-        rights: String(form.get("rights") || "").slice(0, 1000),
-        width: info.width,
-        height: info.height,
-        hash: digest(data),
-        createdAt: now(),
-      };
-      await mkdir(path.join(dataDir, "assets"), { recursive: true });
-      await writeFile(path.join(dataDir, "assets", asset.id + ".jpg"), data);
-      put("asset", asset);
-      audit("asset.uploaded", asset.id);
-      return NextResponse.json({ asset });
-    }
-    if (Number(req.headers.get("content-length") || 0) > 250000)
-      throw new StudioError("Request too large.", 413);
-    const input = await req.json();
-    const action = z.string().parse(input.action);
+    if (req.headers.get("content-type")?.includes("multipart/form-data"))
+      return NextResponse.json(await upload(req));
+    const input = await readJson(req);
+    const action = z.string({ error: "Choose an action." }).parse(input.action);
+    if (!ACTIONS.has(action)) throw new StudioError("Unknown action.");
     if (action === "brand") {
       const data = brandSchema.parse(input.data);
+      // An id means "update this brief"; it must already exist.
+      if (data.id) get<Brand>("brand", data.id);
       const item = { ...data, id: data.id || uid() };
       put("brand", item);
       return NextResponse.json(item);
     }
     if (action === "format") {
       const data = formatSchema.parse(input.data);
+      if (data.id) get<Format>("format", data.id);
       if (data.brandId) get<Brand>("brand", data.brandId);
       const item = { ...data, id: data.id || uid() };
       put("format", item);
       return NextResponse.json(item);
+    }
+    if (action === "asset") {
+      const id = z.string().parse(input.id);
+      const asset = get<Asset>("asset", id);
+      const data = assetUpdateSchema.parse(input.data);
+      const item = { ...asset, ...data };
+      put("asset", item);
+      audit("asset.updated", id);
+      return NextResponse.json(item);
+    }
+    if (action === "removeAsset") {
+      const id = z.string().parse(input.id);
+      const asset = get<Asset>("asset", id);
+      if (assetInUse(id)) {
+        // Revisions are immutable, so keep the file for slideshows that use it.
+        const item = { ...asset, removedAt: now() };
+        put("asset", item);
+        audit("asset.removed", id);
+        return NextResponse.json({ asset: item, kept: true });
+      }
+      remove("asset", id);
+      await unlink(path.join(dataDir, "assets", `${id}.jpg`)).catch(() => {});
+      audit("asset.deleted", id);
+      return NextResponse.json({ asset, kept: false });
     }
     if (action === "hooks") {
       const args = z
@@ -127,11 +265,7 @@ export async function POST(req: NextRequest) {
         throw new StudioError(
           "Keep at most 190 existing hooks before generating ten more.",
         );
-      if (!process.env.OPENAI_API_KEY)
-        throw new StudioError(
-          "Add OPENAI_API_KEY in .env.local and restart to generate hooks.",
-          412,
-        );
+      assertAiAvailable();
       const source = args.prompt
         ? undefined
         : await readWebsite(args.url?.trim() || brand.destination);
@@ -151,6 +285,7 @@ export async function POST(req: NextRequest) {
         })
         .parse(input);
       const brand = get<Brand>("brand", args.brandId);
+      assertAiAvailable();
       const source = await readWebsite(args.url);
       const ideas = await generateIdeas(brand, source);
       return NextResponse.json({
@@ -216,8 +351,10 @@ export async function POST(req: NextRequest) {
                 body: "",
               })),
             };
+      // Removed images stay on disk for old revisions but are never reused.
+      const library = list<Asset>("asset").filter((a) => !a.removedAt);
       const assets = args.collection
-        ? list<Asset>("asset").filter((a) => a.collection === args.collection)
+        ? library.filter((a) => a.collection === args.collection)
         : [];
       const postContent = {
         title: copy.title,
@@ -252,14 +389,13 @@ export async function POST(req: NextRequest) {
           photoFont("semibold"),
           photoFont("regular"),
         ]);
-        const allAssets = list<Asset>("asset");
         postContent.slides = postContent.slides.map((slide, index) =>
           format.templates
             ? templateSlide(
                 slide,
                 format,
                 { default: font, semibold, regular },
-                allAssets,
+                library,
                 index,
                 args.collection,
               )
@@ -272,10 +408,11 @@ export async function POST(req: NextRequest) {
     const id = z.string().parse(input.id);
     const post = get<Post>("post", id);
     if (action === "duplicate") {
+      const suffix = " (copy)";
       return NextResponse.json(
         savePost({
           ...contentOf(post),
-          title: post.title + " (copy)",
+          title: post.title.slice(0, 160 - suffix.length) + suffix,
           plannedAt: "",
         }),
       );
@@ -292,27 +429,36 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(approvePost(id, revision, hashes));
       return NextResponse.json({ ready: true, revision });
     }
-    if (action === "archive") {
-      post.status = "archived";
-      put("post", post);
-      audit("post.archived", id);
-      return NextResponse.json(post);
-    }
+    if (action === "archive") return NextResponse.json(archivePost(id));
+    if (action === "restore") return NextResponse.json(restorePost(id));
     if (action === "publish") {
       const url = z.url().parse(input.url);
-      if (!/^https:\/\/(www\.)?tiktok\.com\//i.test(url))
+      if (!TIKTOK_POST_URL.test(url))
         throw new StudioError(
-          "Enter the HTTPS URL of your published TikTok post.",
+          "Enter the HTTPS link of your published TikTok post (tiktok.com or vm.tiktok.com).",
         );
+      const replace = input.replace === true;
       return NextResponse.json(
         transaction(() => {
           const current = get<Post>("post", id);
           assertApproval(current);
+          // Changing a recorded link must be deliberate, never a silent overwrite.
+          if (current.status === "published" && !replace)
+            throw new StudioError(
+              "This post is already recorded as published. Use “Correct link” to change its URL.",
+              409,
+            );
+          const corrected = current.status === "published";
           current.status = "published";
           current.publishedUrl = url;
-          current.publishedAt = now();
+          if (!corrected) current.publishedAt = now();
           put("post", current);
-          audit("publication.owner_confirmed", id);
+          audit(
+            corrected
+              ? "publication.url_corrected"
+              : "publication.owner_confirmed",
+            id,
+          );
           return current;
         }),
       );
@@ -320,19 +466,18 @@ export async function POST(req: NextRequest) {
     if (action === "metrics") {
       if (post.status !== "published")
         throw new StudioError("Record a published post before adding results.");
-      const metric = z.number().int().nonnegative().nullable();
-      post.metrics = {
-        ...z
-          .object({
-            views: metric,
-            likes: metric,
-            comments: metric,
-            shares: metric,
-          })
-          .parse(input.data),
+      const snapshot = {
+        ...metricsSchema.parse(input.data),
         measuredAt: now(),
       };
+      // Keep earlier snapshots so results can be compared over time.
+      post.metricsHistory = [
+        ...(post.metricsHistory ?? []),
+        ...(post.metrics ? [post.metrics] : []),
+      ].slice(-MAX_METRIC_SNAPSHOTS);
+      post.metrics = snapshot;
       put("post", post);
+      audit("results.recorded", id);
       return NextResponse.json(post);
     }
     throw new StudioError("Unknown action.");
@@ -341,11 +486,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     if (e instanceof z.ZodError)
       return NextResponse.json(
-        {
-          error: e.issues
-            .map((i) => `${i.path.join(".")}: ${i.message}`)
-            .join("; "),
-        },
+        { error: describeIssues(e.issues) },
         { status: 400 },
       );
     console.error(

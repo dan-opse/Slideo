@@ -37,7 +37,7 @@ const regressionCopy = [
   "Keep Risk In The Frame\n\nBetter information does not remove betting risk. Set limits, and never chase losses.",
 ];
 after(() => {
-  store.db.close();
+  store.database().close();
   rmSync(folder, { recursive: true, force: true });
 });
 

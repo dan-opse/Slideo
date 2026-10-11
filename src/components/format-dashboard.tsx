@@ -43,7 +43,11 @@ import {
   tonePresets,
 } from "@/lib/format-template";
 import { PHOTO_RENDER_VERSION } from "@/lib/photo-layout";
+import { collectionsOf, defaultBrandId, libraryAssets } from "@/lib/defaults";
+import { describeIssues } from "@/lib/errors";
 import { PhotoCanvas, usePhotoFonts } from "./photo-canvas";
+import { NumberInput } from "./number-input";
+import { RenderFallback } from "./render-fallback";
 
 type Page = "overview" | "template" | "hooks" | "schedule" | "settings";
 const pages = [
@@ -85,6 +89,7 @@ function Toggle({
       <input
         type="checkbox"
         role="switch"
+        aria-checked={checked}
         checked={checked}
         onChange={(event) => onChange(event.target.checked)}
       />
@@ -93,7 +98,7 @@ function Toggle({
   );
 }
 function normalize(format: Format, state: StudioState): Format {
-  const brandId = format.brandId || state.brands[0]?.id || "";
+  const brandId = defaultBrandId(state, format);
   return {
     ...format,
     brandId,
@@ -150,16 +155,16 @@ export default function FormatDashboard({
   );
   const brand = state.brands.find((item) => item.id === draft.brandId);
   const template = templateFor(draft, role);
-  const collections = [
-    ...new Set(state.assets.map((asset) => asset.collection)),
-  ];
+  const collections = collectionsOf(state.assets);
   const requestClose = useCallback(() => {
     if (busy) return;
     if (dirty) setConfirmClose(true);
     else onClose();
   }, [busy, dirty, onClose]);
   const closeRef = useRef(requestClose);
-  closeRef.current = requestClose;
+  useEffect(() => {
+    closeRef.current = requestClose;
+  }, [requestClose]);
   useEffect(() => {
     if (suspended) return;
     const old = document.body.style.overflow;
@@ -168,7 +173,11 @@ export default function FormatDashboard({
     const key = (event: KeyboardEvent) => {
       const confirmation =
         root.current?.querySelector<HTMLElement>(".fd-confirm");
-      if (!confirmation && document.querySelector('[role="dialog"]')) return;
+      // Defer to any other open dialog (such as calendar details).
+      const otherDialog = [
+        ...document.querySelectorAll<HTMLElement>('[role="dialog"]'),
+      ].some((dialog) => dialog !== root.current && dialog !== confirmation);
+      if (!confirmation && otherDialog) return;
       if (event.key === "Escape") {
         event.preventDefault();
         if (confirmation) setConfirmClose(false);
@@ -246,12 +255,7 @@ export default function FormatDashboard({
       ...draft,
       id: draft.id || undefined,
     });
-    if (!parsed.success)
-      throw new Error(
-        parsed.error.issues
-          .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
-          .join("; "),
-      );
+    if (!parsed.success) throw new Error(describeIssues(parsed.error.issues));
     const next = normalize(
       await onSave({ ...parsed.data, id: draft.id }),
       state,
@@ -349,6 +353,8 @@ export default function FormatDashboard({
         className="fd-window"
         ref={root}
         tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
         aria-label="Format dashboard"
       >
         <aside className="fd-sidebar">
@@ -546,13 +552,7 @@ export default function FormatDashboard({
                                 post.aspect === "story" ? "9 / 16" : "4 / 5",
                             }}
                           >
-                            <Image
-                              fill
-                              unoptimized
-                              sizes="240px"
-                              src={`/api/render/${post.id}/${post.revision}/0?v=${PHOTO_RENDER_VERSION}`}
-                              alt={post.title}
-                            />
+                            <CoverImage post={post} />
                             <span>
                               {post.status === "published"
                                 ? "Published"
@@ -788,13 +788,12 @@ export default function FormatDashboard({
                     label="Default slide count"
                     hint="The creation popup can override this number."
                   >
-                    <input
-                      type="number"
+                    <NumberInput
                       min={2}
                       max={10}
                       value={draft.slideCount}
-                      onChange={(event) =>
-                        patch({ slideCount: Number(event.target.value) })
+                      onChange={(slideCount) =>
+                        patch({ slideCount: Math.round(slideCount) })
                       }
                     />
                   </Field>
@@ -816,15 +815,14 @@ export default function FormatDashboard({
                   <select
                     value={draft.font}
                     onChange={(event) =>
+                      // Role templates are kept (unused by editorial layouts)
+                      // so switching back restores them.
                       patch({
                         font: event.target.value as Format["font"],
                         design:
                           event.target.value === "tiktok"
                             ? "photo"
                             : "editorial",
-                        ...(event.target.value !== "tiktok"
-                          ? { templates: undefined }
-                          : {}),
                       })
                     }
                   >
@@ -910,7 +908,7 @@ export default function FormatDashboard({
                       </select>
                     </Field>
                     <div className="fd-collection-strip">
-                      {state.assets
+                      {libraryAssets(state.assets)
                         .filter(
                           (asset) => asset.collection === template.collection,
                         )
@@ -1135,19 +1133,11 @@ export default function FormatDashboard({
                         </select>
                       </Field>
                       <Field label="Size">
-                        <input
-                          type="number"
+                        <NumberInput
                           min={6}
                           max={48}
                           value={template.size}
-                          onChange={(event) =>
-                            patchTemplate({
-                              size: Math.max(
-                                6,
-                                Math.min(48, Number(event.target.value)),
-                              ),
-                            })
-                          }
+                          onChange={(size) => patchTemplate({ size })}
                         />
                       </Field>
                     </div>
@@ -1168,19 +1158,11 @@ export default function FormatDashboard({
                         </select>
                       </Field>
                       <Field label="Width (%)">
-                        <input
-                          type="number"
+                        <NumberInput
                           min={20}
                           max={100}
                           value={template.width}
-                          onChange={(event) =>
-                            patchTemplate({
-                              width: Math.max(
-                                20,
-                                Math.min(100, Number(event.target.value)),
-                              ),
-                            })
-                          }
+                          onChange={(width) => patchTemplate({ width })}
                         />
                       </Field>
                       <Field label="Alignment">
@@ -1260,5 +1242,22 @@ export default function FormatDashboard({
         )}
       </section>
     </div>
+  );
+}
+
+function CoverImage({ post }: { post: Post }) {
+  const src = `/api/render/${post.id}/${post.revision}/0?v=${PHOTO_RENDER_VERSION}`;
+  const [failed, setFailed] = useState("");
+  return failed === src ? (
+    <RenderFallback />
+  ) : (
+    <Image
+      fill
+      unoptimized
+      sizes="240px"
+      src={src}
+      alt={post.title}
+      onError={() => setFailed(src)}
+    />
   );
 }

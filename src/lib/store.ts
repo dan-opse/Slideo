@@ -14,38 +14,67 @@ import type {
 export const dataDir = path.resolve(
   /* turbopackIgnore: true */ process.env.STUDIO_DATA_DIR || "./data",
 );
-mkdirSync(dataDir, { recursive: true });
-export const db = new DatabaseSync(path.join(dataDir, "studio.sqlite"));
-db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
+let instance: DatabaseSync | undefined;
+// Opened on first use rather than at import, so `next build` (which imports
+// route modules to collect page data) never creates or seeds a workspace.
+export function database() {
+  if (instance) return instance;
+  mkdirSync(dataDir, { recursive: true });
+  instance = new DatabaseSync(path.join(dataDir, "studio.sqlite"));
+  // busy_timeout must come first: switching to WAL needs a lock that a
+  // concurrently starting process may hold.
+  instance.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS entities(kind TEXT NOT NULL,id TEXT NOT NULL,json TEXT NOT NULL,PRIMARY KEY(kind,id));
 CREATE TABLE IF NOT EXISTS revisions(post_id TEXT NOT NULL,revision INTEGER NOT NULL,json TEXT NOT NULL,hash TEXT NOT NULL,PRIMARY KEY(post_id,revision));
 CREATE TABLE IF NOT EXISTS approvals(post_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,hash TEXT NOT NULL,render_hashes TEXT NOT NULL,created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit(id TEXT PRIMARY KEY,action TEXT NOT NULL,entity TEXT NOT NULL,at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS ai_attempts(id TEXT PRIMARY KEY,at TEXT NOT NULL,status TEXT NOT NULL,usage TEXT);
 `);
+  // One writer seeds; concurrent first boots wait on the lock, then see the data.
+  transaction(() => {
+    seed();
+    addPhotoPreset();
+  });
+  return instance;
+}
 export const uid = () => randomUUID();
 export const now = () => new Date().toISOString();
 export function list<T>(kind: string): T[] {
   return (
-    db
+    database()
       .prepare("SELECT json FROM entities WHERE kind=? ORDER BY rowid DESC")
       .all(kind) as { json: string }[]
   ).map((r) => JSON.parse(r.json));
 }
+const missing: Record<string, string> = {
+  brand: "That brand brief no longer exists. Reload the studio.",
+  format: "That format no longer exists. Reload the studio.",
+  post: "That slideshow no longer exists. Reload the studio.",
+  asset: "That image is not in your library. Choose another image.",
+};
 export function get<T>(kind: string, id: string): T {
-  const row = db
+  const row = database()
     .prepare("SELECT json FROM entities WHERE kind=? AND id=?")
     .get(kind, id) as { json: string } | undefined;
-  if (!row) throw new StudioError("Not found", 404);
+  if (!row) throw new StudioError(missing[kind] ?? "Not found.", 404);
   return JSON.parse(row.json);
 }
 export function put<T extends { id: string }>(kind: string, item: T) {
-  db.prepare(
-    "INSERT INTO entities VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET json=excluded.json",
-  ).run(kind, item.id, JSON.stringify(item));
+  database()
+    .prepare(
+      "INSERT INTO entities VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET json=excluded.json",
+    )
+    .run(kind, item.id, JSON.stringify(item));
+}
+export function remove(kind: string, id: string) {
+  database()
+    .prepare("DELETE FROM entities WHERE kind=? AND id=?")
+    .run(kind, id);
 }
 export function audit(action: string, id: string) {
-  db.prepare("INSERT INTO audit VALUES(?,?,?,?)").run(uid(), action, id, now());
+  database()
+    .prepare("INSERT INTO audit VALUES(?,?,?,?)")
+    .run(uid(), action, id, now());
 }
 export class StudioError extends Error {
   constructor(
@@ -55,8 +84,13 @@ export class StudioError extends Error {
     super(message);
   }
 }
+let depth = 0;
+// Nested calls join the outermost transaction; its rollback undoes everything.
 export function transaction<T>(fn: () => T): T {
+  if (depth > 0) return fn();
+  const db = database();
   db.exec("BEGIN IMMEDIATE");
+  depth++;
   try {
     const result = fn();
     db.exec("COMMIT");
@@ -64,6 +98,8 @@ export function transaction<T>(fn: () => T): T {
   } catch (e) {
     db.exec("ROLLBACK");
     throw e;
+  } finally {
+    depth--;
   }
 }
 export function digest(value: string | Buffer) {
@@ -79,6 +115,7 @@ export function contentOf(post: Post): PostContent {
     publishedUrl,
     publishedAt,
     metrics,
+    metricsHistory,
     ...content
   } = post;
   void [
@@ -90,6 +127,7 @@ export function contentOf(post: Post): PostContent {
     publishedUrl,
     publishedAt,
     metrics,
+    metricsHistory,
   ];
   return content;
 }
@@ -119,6 +157,7 @@ export function savePost(
       updatedAt: now(),
     };
     put("post", post);
+    const db = database();
     db.prepare("INSERT INTO revisions VALUES(?,?,?,?)").run(
       post.id,
       post.revision,
@@ -131,7 +170,7 @@ export function savePost(
   });
 }
 export function revisionContent(id: string, revision: number): PostContent {
-  const row = db
+  const row = database()
     .prepare("SELECT json FROM revisions WHERE post_id=? AND revision=?")
     .get(id, revision) as { json: string } | undefined;
   if (!row) throw new StudioError("Revision not found", 404);
@@ -151,25 +190,34 @@ export function approvePost(id: string, revision: number, hashes: string[]) {
       );
     if (hashes.length !== post.slides.length)
       throw new StudioError("Render every slide before approval.");
-    for (const slide of post.slides) {
-      if (!slide.title.trim())
-        throw new StudioError("Every slide needs a heading before approval.");
-      if (
-        slideAssetIds(slide).some(
-          (id) => !get<Asset>("asset", id).rights.trim(),
-        )
-      )
+    post.slides.forEach((slide, index) => {
+      const images = slideAssetIds(slide);
+      // Photo slides may be image-only; editorial slides are built around a heading.
+      const empty =
+        slide.design === "photo"
+          ? !images.length &&
+            !(slide.textLayers ?? []).some((layer) => layer.text.trim())
+          : !slide.title.trim();
+      if (empty)
         throw new StudioError(
-          "Record usage rights for every background before approval.",
+          slide.design === "photo"
+            ? `Slide ${index + 1} is empty. Add text or a background image before approval.`
+            : `Slide ${index + 1} needs a heading before approval.`,
         );
-    }
-    db.prepare("INSERT OR REPLACE INTO approvals VALUES(?,?,?,?,?)").run(
-      id,
-      revision,
-      digest(JSON.stringify(contentOf(post))),
-      JSON.stringify(hashes),
-      now(),
-    );
+      if (images.some((id) => !get<Asset>("asset", id).rights.trim()))
+        throw new StudioError(
+          `Slide ${index + 1}: record usage rights for its images in Assets before approval.`,
+        );
+    });
+    database()
+      .prepare("INSERT OR REPLACE INTO approvals VALUES(?,?,?,?,?)")
+      .run(
+        id,
+        revision,
+        digest(JSON.stringify(contentOf(post))),
+        JSON.stringify(hashes),
+        now(),
+      );
     post.status = "approved";
     put("post", post);
     audit("export.approved", id);
@@ -177,7 +225,7 @@ export function approvePost(id: string, revision: number, hashes: string[]) {
   });
 }
 export function assertApproval(post: Post) {
-  const a = db
+  const a = database()
     .prepare(
       "SELECT revision,hash,render_hashes FROM approvals WHERE post_id=?",
     )
@@ -195,10 +243,44 @@ export function assertApproval(post: Post) {
     );
   return JSON.parse(a.render_hashes) as string[];
 }
+export function archivePost(id: string) {
+  return transaction(() => {
+    const post = get<Post>("post", id);
+    // Published posts carry the URL and results; archiving would hide them for good.
+    if (post.status === "published")
+      throw new StudioError(
+        "Published posts stay in Results and can't be deleted. Duplicate it to start a new version.",
+        409,
+      );
+    if (post.status === "archived") return post;
+    post.status = "archived";
+    put("post", post);
+    database().prepare("DELETE FROM approvals WHERE post_id=?").run(id);
+    audit("post.archived", id);
+    return post;
+  });
+}
+export function restorePost(id: string) {
+  return transaction(() => {
+    const post = get<Post>("post", id);
+    if (post.status !== "archived")
+      throw new StudioError("Only deleted slideshows can be restored.", 409);
+    post.status = "needs_review";
+    put("post", post);
+    audit("post.restored", id);
+    return post;
+  });
+}
+// Revisions are immutable, so an image used by any revision must keep its file.
+export function assetInUse(id: string) {
+  return !!database()
+    .prepare("SELECT 1 FROM revisions WHERE instr(json, ?) > 0 LIMIT 1")
+    .get(JSON.stringify(id));
+}
 export function dailyUsage() {
   return Number(
     (
-      db
+      database()
         .prepare("SELECT COUNT(*) AS n FROM ai_attempts WHERE at>=?")
         .get(now().slice(0, 10)) as { n: number }
     ).n,
@@ -350,9 +432,10 @@ function seed() {
     })),
   });
 }
-seed();
 // Add the new preset once without changing existing formats or approved posts.
-if (!list<Format>("format").some((format) => format.id === "tiktok-photo")) {
+function addPhotoPreset() {
+  if (list<Format>("format").some((format) => format.id === "tiktok-photo"))
+    return;
   put("format", {
     id: "tiktok-photo",
     name: "TikTok photo story",

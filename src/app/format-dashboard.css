@@ -69,7 +69,7 @@
 .fd-brand small {
   display: block;
   font-size: 10px;
-  color: #82877f;
+  color: #72766f;
   margin-bottom: 3px;
 }
 .fd-brand select {
@@ -94,7 +94,7 @@
   min-height: 46px;
   padding: 10px 12px;
   background: transparent;
-  color: #777c75;
+  color: #6c706a;
   font-size: 12px;
   border-radius: 7px;
 }
@@ -122,7 +122,7 @@
 .fd-sidebar-bottom {
   margin-top: auto;
   padding: 30px 10px 0;
-  color: #7a8275;
+  color: #6a7166;
 }
 .fd-sidebar-bottom p {
   display: flex;
@@ -166,7 +166,7 @@
   align-items: center;
   gap: 8px;
   font-size: 10px;
-  color: #7b8278;
+  color: #70766d;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -179,7 +179,7 @@
 }
 .fd-toolbar small {
   font-size: 10px;
-  color: #7a8076;
+  color: #71766d;
 }
 .fd-save {
   display: flex;
@@ -267,7 +267,7 @@
 }
 .fd-profile p {
   font-size: 12px;
-  color: #7d827a;
+  color: #72766f;
   line-height: 1.7;
   margin-top: 6px;
 }
@@ -288,7 +288,7 @@
   font-size: 16px;
 }
 .fd-recent h2 span {
-  color: #929a8c;
+  color: #6b7365;
   font-weight: 400;
 }
 .fd-recent header > div {
@@ -383,7 +383,7 @@
 .fd-writing > p,
 .fd-settings > p,
 .fd-schedule > p {
-  color: #777f71;
+  color: #70776a;
   line-height: 1.7;
   font-size: 13px;
   margin: 8px 0 23px;
@@ -398,7 +398,7 @@
   padding: 0 0 12px;
   background: transparent;
   border-bottom: 2px solid transparent;
-  color: #899083;
+  color: #6a7165;
   font-size: 12px;
 }
 .fd-tabs button[aria-selected="true"] {
@@ -443,7 +443,7 @@
 }
 .fd-field small,
 .fd-help {
-  color: #7b8474;
+  color: #6b7365;
   font-size: 11px;
   line-height: 1.7;
 }
@@ -518,7 +518,7 @@
 .fd-template-options summary {
   cursor: pointer;
   font-size: 11px;
-  color: #79856d;
+  color: #69735e;
   margin-bottom: 20px;
 }
 .fd-collection-strip {
@@ -534,7 +534,7 @@
 }
 .fd-collection-strip small {
   font-size: 10px;
-  color: #7c8575;
+  color: #6a7164;
   line-height: 1.6;
 }
 .fd-toggle {
@@ -599,7 +599,7 @@
 }
 .fd-template-stage > header > span {
   font-size: 9px;
-  color: #61685d;
+  color: #484d45;
   letter-spacing: 0.1em;
 }
 .fd-template-stage > header div {
@@ -636,7 +636,7 @@
 .fd-template-slides > button > span {
   display: block;
   font-size: 11px;
-  color: #686f62;
+  color: #494d44;
   margin-bottom: 12px;
 }
 .fd-template-slides .photo-canvas {

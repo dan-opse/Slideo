@@ -28,6 +28,7 @@ import {
   Pencil,
   Plus,
   Redo2,
+  RotateCcw,
   Send,
   ShieldCheck,
   Trash2,
@@ -44,6 +45,8 @@ import {
   photoSlide,
 } from "@/lib/photo-layout";
 import { PhotoCanvas, usePhotoFonts } from "./photo-canvas";
+import { NumberInput } from "./number-input";
+import { collectionsOf, libraryAssets } from "@/lib/defaults";
 
 async function request(action: string, data: Record<string, unknown> = {}) {
   const response = await fetch("/api/studio", {
@@ -51,7 +54,7 @@ async function request(action: string, data: Record<string, unknown> = {}) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, ...data }),
   });
-  const body = await response.json();
+  const body = await response.json().catch(() => ({}));
   if (!response.ok)
     throw new Error(body.error || "The action could not be completed.");
   return body;
@@ -81,19 +84,12 @@ function NumberControl({
 }) {
   return (
     <Control label={label}>
-      <input
-        type="number"
-        value={Number(value.toFixed(2))}
+      <NumberInput
+        value={value}
         min={min}
         max={max}
         step={step}
-        onChange={(event) => {
-          if (
-            event.target.value !== "" &&
-            Number.isFinite(event.target.valueAsNumber)
-          )
-            onChange(clamp(event.target.valueAsNumber, min, max));
-        }}
+        onChange={onChange}
       />
     </Control>
   );
@@ -172,6 +168,7 @@ export default function SlideshowEditor({
   const [collection, setCollection] = useState("");
   const { fonts, error: fontError } = usePhotoFonts();
   const root = useRef<HTMLDivElement>(null);
+  const sheetOpener = useRef<HTMLElement | null>(null);
   const track = useRef<HTMLDivElement>(null);
   const latest = useRef({ close: () => {} });
   const dirty = JSON.stringify(post) !== JSON.stringify(saved);
@@ -180,6 +177,10 @@ export default function SlideshowEditor({
   const layer = layers.find((item) => item.id === layerId) ?? layers[0];
   const immutable = post.status === "published";
   const approved = saved.status === "approved" || saved.status === "published";
+  const deleted = saved.status === "archived";
+  // Removed images stay selectable only where a slide already uses them.
+  const pickable = (current?: string | null) =>
+    state.assets.filter((asset) => !asset.removedAt || asset.id === current);
   const height = canvasHeight(post.aspect);
   const overflow = !!(
     fonts &&
@@ -195,11 +196,21 @@ export default function SlideshowEditor({
     setFuture([]);
     setPost(next);
   }
+  // Photo slides keep title/body in step with their text boxes, so captions,
+  // alt text and hook history never describe text that is no longer there.
+  function withCopy(slide: Slide): Slide {
+    if (slide.design !== "photo" || !slide.textLayers) return slide;
+    const text = slide.textLayers
+      .map((item) => item.text.trim())
+      .filter(Boolean)
+      .join("\n\n");
+    return { ...slide, title: text.slice(0, 180), body: text.slice(180, 630) };
+  }
   function patch(data: Partial<Slide>) {
     update({
       ...post,
       slides: post.slides.map((item, index) =>
-        index === selected ? { ...item, ...data } : item,
+        index === selected ? withCopy({ ...item, ...data }) : item,
       ),
     });
   }
@@ -209,9 +220,6 @@ export default function SlideshowEditor({
       textLayers: layers.map((item) =>
         item.id === layer.id ? { ...item, ...data } : item,
       ),
-      ...(data.text !== undefined && layer.id === layers[0]?.id
-        ? { title: data.text.slice(0, 180), body: data.text.slice(180, 630) }
-        : {}),
     });
   }
   function choose(index: number) {
@@ -224,10 +232,12 @@ export default function SlideshowEditor({
       setSheet(null);
       return;
     }
-    if (dirty) setSheet("discard");
+    if (dirty) openSheet("discard");
     else onClose();
   }
-  latest.current.close = close;
+  useEffect(() => {
+    latest.current.close = close;
+  });
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const oldOverflow = document.body.style.overflow;
@@ -273,6 +283,22 @@ export default function SlideshowEditor({
       previous?.focus();
     };
   }, []);
+  // Move focus into an action sheet when it opens and back when it closes.
+  useEffect(() => {
+    if (!sheet) return;
+    const opener = sheetOpener.current;
+    const sheetEl = root.current?.querySelector<HTMLElement>(".photo-sheet");
+    (
+      sheetEl?.querySelector<HTMLElement>("input:not(:disabled)") ?? sheetEl
+    )?.focus();
+    return () => {
+      if (opener?.isConnected) opener.focus();
+    };
+  }, [sheet]);
+  function openSheet(next: NonNullable<typeof sheet>) {
+    sheetOpener.current = document.activeElement as HTMLElement | null;
+    setSheet(next);
+  }
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (dirty) event.preventDefault();
@@ -564,7 +590,7 @@ export default function SlideshowEditor({
                 className="photo-tool"
                 disabled={busy}
                 onClick={() =>
-                  dirty ? setSheet("discard") : setEditing(false)
+                  dirty ? openSheet("discard") : setEditing(false)
                 }
               >
                 Cancel edits
@@ -608,6 +634,7 @@ export default function SlideshowEditor({
               {post.slides.map((item, index) => (
                 <div
                   key={item.id}
+                  role="presentation"
                   className={`photo-frame ${selected === index ? "selected" : ""}`}
                   onClick={() => {
                     if (selected !== index) choose(index);
@@ -695,7 +722,7 @@ export default function SlideshowEditor({
                 <Download size={17} />
                 Download images
               </button>
-              {!approved && (
+              {!approved && !deleted && (
                 <button
                   className="photo-action"
                   disabled={busy}
@@ -723,15 +750,17 @@ export default function SlideshowEditor({
               <button
                 className="photo-action"
                 disabled={!approved}
-                onClick={() => setSheet("publish")}
+                onClick={() => openSheet("publish")}
               >
                 <Send size={17} />
-                Publish to TikTok
+                {saved.status === "published"
+                  ? "Correct TikTok link"
+                  : "Publish to TikTok"}
               </button>
               <button
                 className="photo-action"
-                disabled={immutable}
-                onClick={() => setSheet("queue")}
+                disabled={immutable || deleted}
+                onClick={() => openSheet("queue")}
               >
                 <CalendarPlus size={17} />
                 Add to queue
@@ -746,7 +775,14 @@ export default function SlideshowEditor({
                 <strong>{post.title}</strong>
                 <span>
                   {post.slides.length} slides ·{" "}
-                  {approved ? "Approved" : "Needs review"}
+                  {
+                    {
+                      needs_review: "Needs review",
+                      approved: "Approved",
+                      published: "Published",
+                      archived: "Deleted",
+                    }[saved.status]
+                  }
                 </span>
                 {post.flags.length > 0 && <p>{post.flags.join(" · ")}</p>}
               </div>
@@ -762,14 +798,37 @@ export default function SlideshowEditor({
                 <Copy size={14} />
                 Copy caption
               </button>
-              <button
-                className="photo-action danger delete-post"
-                disabled={busy}
-                onClick={() => setSheet("delete")}
-              >
-                <Trash2 size={17} />
-                Delete
-              </button>
+              {deleted ? (
+                <button
+                  className="photo-action delete-post"
+                  disabled={busy}
+                  onClick={() =>
+                    action(async () => {
+                      const next = await request("restore", { id: saved.id });
+                      setPost(next);
+                      setSaved(next);
+                      await onSaved();
+                      onToast("Slideshow restored. Review it before export.");
+                    })
+                  }
+                >
+                  <RotateCcw size={17} />
+                  Restore slideshow
+                </button>
+              ) : saved.status === "published" ? (
+                <p className="photo-note delete-post">
+                  Published posts stay in Results with their link and metrics.
+                </p>
+              ) : (
+                <button
+                  className="photo-action danger delete-post"
+                  disabled={busy}
+                  onClick={() => openSheet("delete")}
+                >
+                  <Trash2 size={17} />
+                  Delete
+                </button>
+              )}
             </aside>
           )}
         </div>
@@ -912,7 +971,7 @@ export default function SlideshowEditor({
                         }
                       >
                         <option value="">Solid color</option>
-                        {state.assets.map((asset) => (
+                        {pickable(slide.assetId).map((asset) => (
                           <option key={asset.id} value={asset.id}>
                             {asset.name}
                           </option>
@@ -1202,7 +1261,7 @@ export default function SlideshowEditor({
                         }
                       >
                         <option value="">Solid color</option>
-                        {state.assets.map((asset) => (
+                        {pickable(slide.assetId).map((asset) => (
                           <option key={asset.id} value={asset.id}>
                             {asset.name}
                           </option>
@@ -1215,18 +1274,14 @@ export default function SlideshowEditor({
                         onChange={(event) => setCollection(event.target.value)}
                       >
                         <option value="">All images</option>
-                        {Array.from(
-                          new Set(
-                            state.assets.map((asset) => asset.collection),
-                          ),
-                        ).map((value) => (
+                        {collectionsOf(state.assets).map((value) => (
                           <option key={value}>{value}</option>
                         ))}
                       </select>
                     </Control>
                   </div>
                   <div className="photo-image-strip">
-                    {state.assets
+                    {libraryAssets(state.assets)
                       .filter(
                         (asset) =>
                           !collection || asset.collection === collection,
@@ -1250,7 +1305,7 @@ export default function SlideshowEditor({
                           />
                         </button>
                       ))}
-                    {!state.assets.length && (
+                    {!libraryAssets(state.assets).length && (
                       <p>
                         Upload photos in Assets to give this slideshow a
                         background.
@@ -1290,17 +1345,25 @@ export default function SlideshowEditor({
                           <select
                             value={slide.additionalAssetIds?.[index] ?? ""}
                             onChange={(event) => {
-                              const ids = [...(slide.additionalAssetIds ?? [])];
+                              // Fill skipped slots with "" so the array never
+                              // has holes (holes serialize as null and fail).
+                              const current = slide.additionalAssetIds ?? [];
+                              const ids = Array.from(
+                                { length: Math.max(index + 1, current.length) },
+                                (_, i) => current[i] ?? "",
+                              );
                               ids[index] = event.target.value;
                               patch({ additionalAssetIds: ids });
                             }}
                           >
                             <option value="">No image</option>
-                            {state.assets.map((asset) => (
-                              <option key={asset.id} value={asset.id}>
-                                {asset.name}
-                              </option>
-                            ))}
+                            {pickable(slide.additionalAssetIds?.[index]).map(
+                              (asset) => (
+                                <option key={asset.id} value={asset.id}>
+                                  {asset.name}
+                                </option>
+                              ),
+                            )}
                           </select>
                         </Control>
                       ),
@@ -1487,6 +1550,7 @@ export default function SlideshowEditor({
             className="photo-sheet"
             role="dialog"
             aria-modal="true"
+            tabIndex={-1}
             aria-label={
               sheet === "discard"
                 ? "Unsaved changes"
@@ -1564,14 +1628,25 @@ export default function SlideshowEditor({
                   Choose a planned posting time. You’ll publish manually after
                   approval.
                 </p>
+                {saved.status === "approved" && (
+                  <p className="photo-sheet-warning" role="note">
+                    The posting time is part of your approval, so scheduling
+                    creates a new revision that needs approving again before you
+                    can download it.
+                  </p>
+                )}
                 <form
                   onSubmit={(event) => {
                     event.preventDefault();
-                    const value = new FormData(event.currentTarget).get(
-                      "plannedAt",
-                    ) as string;
+                    const form = new FormData(event.currentTarget);
+                    const value = form.get("plannedAt") as string;
+                    // Re-approval only happens when the owner explicitly asks.
+                    const reapprove =
+                      (
+                        event.nativeEvent as SubmitEvent
+                      ).submitter?.getAttribute("value") === "approve";
                     action(async () => {
-                      const next = await request("save", {
+                      let next: Post = await request("save", {
                         id: saved.id,
                         expected: saved.revision,
                         data: {
@@ -1579,11 +1654,27 @@ export default function SlideshowEditor({
                           plannedAt: new Date(value).toISOString(),
                         },
                       });
+                      if (reapprove) {
+                        await request("render", {
+                          id: next.id,
+                          revision: next.revision,
+                        });
+                        next = await request("approve", {
+                          id: next.id,
+                          revision: next.revision,
+                        });
+                      }
                       setPost(next);
                       setSaved(next);
                       await onSaved();
                       setSheet(null);
-                      onToast("Added to your calendar for review.");
+                      onToast(
+                        reapprove
+                          ? "Scheduled and approved again for export."
+                          : saved.status === "approved"
+                            ? "Scheduled. Approve it again before downloading."
+                            : "Added to your calendar for review.",
+                      );
                     });
                   }}
                 >
@@ -1595,17 +1686,35 @@ export default function SlideshowEditor({
                       defaultValue={localDate(post.plannedAt)}
                     />
                   </Control>
-                  <button className="photo-action orange" disabled={busy}>
+                  <button
+                    className={`photo-action ${saved.status === "approved" ? "" : "orange"}`}
+                    disabled={busy}
+                    value="queue"
+                  >
                     Save to queue
                   </button>
+                  {saved.status === "approved" && (
+                    <button
+                      className="photo-action orange"
+                      disabled={busy}
+                      value="approve"
+                    >
+                      Save and approve again
+                    </button>
+                  )}
                 </form>
               </>
             ) : (
               <>
-                <h2>Publish to TikTok</h2>
+                <h2>
+                  {saved.status === "published"
+                    ? "Correct the TikTok link"
+                    : "Publish to TikTok"}
+                </h2>
                 <p>
-                  Download the approved images, upload them in TikTok, then
-                  record the published link here.
+                  {saved.status === "published"
+                    ? `Recorded as ${saved.publishedUrl}. Replace it only if that link is wrong.`
+                    : "Download the approved images, upload them in TikTok, then record the published link here."}
                 </p>
                 <button
                   className="photo-action blue"
@@ -1619,16 +1728,22 @@ export default function SlideshowEditor({
                   onSubmit={(event) => {
                     event.preventDefault();
                     const url = new FormData(event.currentTarget).get("url");
+                    const replace = saved.status === "published";
                     action(async () => {
                       const next = await request("publish", {
                         id: saved.id,
                         url,
+                        replace,
                       });
                       setPost(next);
                       setSaved(next);
                       await onSaved();
                       setSheet(null);
-                      onToast("Published post recorded.");
+                      onToast(
+                        replace
+                          ? "TikTok link corrected."
+                          : "Published post recorded.",
+                      );
                     });
                   }}
                 >
@@ -1637,11 +1752,14 @@ export default function SlideshowEditor({
                       name="url"
                       type="url"
                       required
-                      placeholder="https://www.tiktok.com/@you/photo/…"
+                      defaultValue={saved.publishedUrl ?? ""}
+                      placeholder="https://www.tiktok.com/@you/photo/… or https://vm.tiktok.com/…"
                     />
                   </Control>
                   <button className="photo-action orange" disabled={busy}>
-                    Record published post
+                    {saved.status === "published"
+                      ? "Save corrected link"
+                      : "Record published post"}
                   </button>
                 </form>
               </>

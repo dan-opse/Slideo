@@ -1,5 +1,5 @@
 import sharp, { type OverlayOptions } from "sharp";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { access, readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { dataDir, digest, get, revisionContent, StudioError } from "./store";
 import type { Asset } from "./schema";
@@ -44,7 +44,14 @@ export async function renderSlide(
   let base: Buffer;
   if (s.assetId) {
     get<Asset>("asset", s.assetId);
-    base = await sharp(path.join(dataDir, "assets", `${s.assetId}.jpg`))
+    const source = path.join(dataDir, "assets", `${s.assetId}.jpg`);
+    await access(source).catch(() => {
+      throw new StudioError(
+        `Slide ${index + 1}: its background image is missing from your library. Choose another image.`,
+        422,
+      );
+    });
+    base = await sharp(source)
       .resize(width, height, { fit: "cover", position: "attention" })
       .jpeg()
       .toBuffer();
@@ -74,6 +81,7 @@ export async function renderSlide(
     if (info.height > maxHeight)
       throw new StudioError(
         `Slide ${index + 1}: text is too tall. Shorten the copy or reduce heading size.`,
+        422,
       );
     return { input: data, info };
   }

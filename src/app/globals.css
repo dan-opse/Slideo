@@ -2,7 +2,7 @@
   --bg: #f8f9f5;
   --surface: #fff;
   --ink: #27372f;
-  --muted: #7b847b;
+  --muted: #656d65;
   --line: #e6e9e0;
   --green: #315c40;
   --lime: #d7e4bb;
@@ -192,7 +192,7 @@ code {
 }
 .nav-label {
   font-size: 10px;
-  color: #959d91;
+  color: #6e776a;
   font-weight: 650;
   letter-spacing: 1.6px;
   margin: 32px 14px 13px;
@@ -209,7 +209,7 @@ nav button,
   background: transparent;
   border-radius: 7px;
   text-align: left;
-  color: #7b837b;
+  color: #707770;
   padding: 12px 14px;
   font-size: 13px;
 }
@@ -259,7 +259,7 @@ nav button svg {
   font-size: 11px;
   line-height: 1.7;
   margin-top: 6px;
-  color: #929a8c;
+  color: #6b7365;
 }
 .settings {
   width: 100%;
@@ -290,7 +290,7 @@ nav button svg {
 .profile small {
   display: block;
   font-size: 10px;
-  color: #939a8d;
+  color: #6f7769;
   margin-top: 5px;
 }
 .profile i {
@@ -321,7 +321,7 @@ nav button svg {
   font-size: 11px;
 }
 .breadcrumb > span {
-  color: #939b90;
+  color: #6c7569;
 }
 .breadcrumb > strong {
   font-weight: 500;
@@ -335,7 +335,7 @@ nav button svg {
   align-items: center;
   gap: 8px;
   font-size: 10px;
-  color: #939b8d;
+  color: #6d7567;
 }
 .small-avatar {
   width: 29px;
@@ -357,7 +357,7 @@ nav button svg {
   font-size: 9px;
   font-weight: 650;
   letter-spacing: 1.8px;
-  color: #8e9a83;
+  color: #69755f;
   margin-bottom: 12px;
 }
 .page-heading h1 {
@@ -367,7 +367,7 @@ nav button svg {
   letter-spacing: -1.35px;
 }
 .page-heading p {
-  color: #8b9486;
+  color: #6a7366;
   margin-top: 10px;
   font-size: 12px;
 }
@@ -665,7 +665,7 @@ nav button svg {
   font-size: 11px;
   letter-spacing: 0;
   font-weight: 400;
-  color: #929d85;
+  color: #69745d;
   margin-left: 7px;
 }
 .search-box {
@@ -683,11 +683,15 @@ nav button svg {
   background: none;
   border: 0;
   padding: 9px 0;
-  font-size: 10px;
+  font-size: 12px;
   outline: 0;
 }
 .search-box input:focus-visible {
   outline: none;
+}
+.search-box:focus-within {
+  outline: 3px solid #98b17e;
+  outline-offset: 3px;
 }
 .tabs {
   display: flex;
@@ -698,7 +702,7 @@ nav button svg {
 .tabs button {
   font-size: 11px;
   background: transparent;
-  color: #96a087;
+  color: #6a745c;
   padding: 0 0 13px;
   position: relative;
 }
@@ -812,7 +816,7 @@ nav button svg {
 }
 .status.archived {
   background: #eee;
-  color: #888;
+  color: #757575;
 }
 .post-title {
   display: block;
@@ -852,7 +856,7 @@ nav button svg {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #849776;
+  color: #647458;
 }
 .new-post-card > span {
   height: 48px;
@@ -869,7 +873,7 @@ nav button svg {
 }
 .new-post-card small {
   font-size: 10px;
-  color: #9daa8f;
+  color: #667358;
   margin-top: 8px;
 }
 .page-footer {
@@ -877,7 +881,7 @@ nav button svg {
   align-items: center;
   gap: 7px;
   font-size: 10px;
-  color: #acb39f;
+  color: #6b745c;
   margin-top: 43px;
   padding: 18px 0;
   border-top: 1px solid #ebeee3;
@@ -981,14 +985,14 @@ nav button svg {
   padding-top: 19px;
   font-size: 12px;
   line-height: 1.7;
-  color: #7b886e;
+  color: #6d7861;
   margin-bottom: 25px;
 }
 .brand-detail > span {
   display: block;
   font-size: 9px;
   letter-spacing: 1.5px;
-  color: #a1aa96;
+  color: #6e7862;
   margin-bottom: 7px;
 }
 .empty-state {
@@ -1089,7 +1093,7 @@ nav button svg {
   margin: 25px 0;
 }
 .settings-card dt {
-  color: #929d85;
+  color: #69745d;
 }
 .settings-card dd {
   margin: 0;
@@ -1134,7 +1138,9 @@ nav button svg {
 }
 .toast {
   position: fixed;
-  bottom: 25px;
+  /* Top of the screen, and click-through, so it never covers editor controls. */
+  top: 18px;
+  pointer-events: none;
   left: 50%;
   transform: translateX(-50%);
   background: #2f4e36;
@@ -1203,7 +1209,7 @@ nav button svg {
   font-size: 11px;
   font-weight: 600;
   margin-bottom: 8px;
-  color: #6e7d61;
+  color: #68765c;
 }
 .field input,
 .field textarea,
@@ -1213,7 +1219,7 @@ nav button svg {
 .field small {
   display: block;
   font-size: 10px;
-  color: #8b977e;
+  color: #6b765f;
   margin-top: 6px;
   line-height: 1.6;
 }
@@ -1257,7 +1263,7 @@ nav button svg {
 }
 .idea-trigger small {
   margin-top: 4px;
-  color: #7b8970;
+  color: #66715d;
   font-size: 10px;
   line-height: 1.45;
 }
@@ -1370,7 +1376,7 @@ nav button svg {
 }
 .form-note {
   font-size: 11px;
-  color: #8b977d;
+  color: #6b765f;
   line-height: 1.7;
 }
 .modal-actions {
@@ -1391,7 +1397,7 @@ nav button svg {
   flex-direction: column;
   gap: 15px;
   margin-bottom: 25px;
-  color: #81946a;
+  color: #637251;
 }
 .upload-zone strong {
   font-size: 13px;
@@ -1426,7 +1432,7 @@ nav button svg {
 .day-name {
   padding: 14px;
   font-size: 10px;
-  color: #96a185;
+  color: #6e795d;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
@@ -1439,7 +1445,7 @@ nav button svg {
 }
 .calendar-day > span {
   font-size: 11px;
-  color: #889579;
+  color: #6d7960;
 }
 .calendar-day.today > span {
   display: inline-grid;
@@ -1454,7 +1460,7 @@ nav button svg {
   background: #f8f9f4;
 }
 .calendar-day.outside > span {
-  color: #c5ccbd;
+  color: #69755a;
 }
 .calendar-day button {
   display: block;
@@ -2540,5 +2546,52 @@ td a {
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
+  }
+}
+
+.alert.modal-alert {
+  margin: 0 0 18px;
+}
+.button.danger {
+  background: #a3402b;
+  color: #fff;
+}
+.asset-edit {
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.render-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px;
+  text-align: center;
+  background: #f6efe8;
+  color: #7a4220;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.render-fallback strong {
+  font-size: 12px;
+}
+@media (max-width: 760px) {
+  /* Keep the review count visible on the icon-only navigation. */
+  .sidebar nav button {
+    position: relative;
+  }
+  .sidebar nav button b {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    font-size: 9px;
+    min-width: 16px;
+    padding: 1px 3px;
+    line-height: 1.4;
   }
 }
