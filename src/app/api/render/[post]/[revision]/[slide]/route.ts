@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guard } from "@/lib/guard";
 import { renderSlide } from "@/lib/render";
+import { StudioError } from "@/lib/store";
 export async function GET(
   req: NextRequest,
   {
@@ -11,17 +12,26 @@ export async function GET(
   if (denied) return denied;
   try {
     const p = await params;
-    const data = await renderSlide(p.post, Number(p.revision), Number(p.slide));
-    return new NextResponse(data, {
+    const revision = Number(p.revision),
+      slide = Number(p.slide);
+    if (!Number.isInteger(revision) || !Number.isInteger(slide))
+      throw new StudioError("Slide not found", 404);
+    const data = await renderSlide(p.post, revision, slide);
+    return new NextResponse(new Uint8Array(data), {
       headers: {
         "Content-Type": "image/jpeg",
         "Cache-Control": "private, max-age=31536000, immutable",
       },
     });
   } catch (e) {
+    // Only deliberate, user-facing errors are echoed; anything else may
+    // contain server paths.
+    if (e instanceof StudioError)
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    console.error("Render failed", e instanceof Error ? e.name : "Unknown");
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Render failed" },
-      { status: 422 },
+      { error: "This slide could not be rendered." },
+      { status: 500 },
     );
   }
 }

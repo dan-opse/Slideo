@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import dynamic from "next/dynamic";
 const SlideshowEditor = dynamic(() => import("./slideshow-editor"), {
   ssr: false,
@@ -27,6 +28,7 @@ import {
   Leaf,
   LayoutDashboard,
   Loader2,
+  Pencil,
   Plus,
   Search,
   Settings2,
@@ -36,8 +38,16 @@ import {
   X,
   AlertCircle,
 } from "lucide-react";
-import type { Brand, Format, Post, StudioState } from "@/lib/schema";
+import type { Asset, Brand, Format, Post, StudioState } from "@/lib/schema";
 import { PHOTO_RENDER_VERSION } from "@/lib/photo-layout";
+import {
+  blankFormat,
+  collectionsOf,
+  defaultBrandId,
+  libraryAssets,
+  plural,
+} from "@/lib/defaults";
+import { RenderFallback } from "./render-fallback";
 type View =
   | "Overview"
   | "Review queue"
@@ -60,7 +70,7 @@ const statusLabel = {
   needs_review: "Needs review",
   approved: "Approved",
   published: "Published",
-  archived: "Archived",
+  archived: "Deleted",
 };
 const imgUrl = (p: Post, i = 0) =>
   `/api/render/${p.id}/${p.revision}/${i}${p.slides[i]?.design === "photo" ? `?v=${PHOTO_RENDER_VERSION}` : ""}`;
@@ -79,8 +89,11 @@ async function api(action: string, data: Record<string, unknown> = {}) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, ...data }),
   });
-  const body = await r.json();
-  if (!r.ok) throw new Error(body.error || "Request failed");
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok)
+    throw new Error(
+      body.error || "The studio did not respond correctly. Try again.",
+    );
   return body;
 }
 function IconButton({
@@ -129,20 +142,28 @@ function Modal({
   onClose,
   children,
   wide = false,
+  error,
 }: {
   title: string;
   subtitle?: string;
   onClose: () => void;
   children: React.ReactNode;
   wide?: boolean;
+  error?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Callers pass inline handlers; reading the latest one through a ref keeps
+  // the focus effect from re-running (and stealing focus) on every render.
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  }, [onClose]);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement;
     const el = ref.current;
     el?.querySelector<HTMLElement>("input,button,select,textarea")?.focus();
     const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") closeRef.current();
       if (e.key === "Tab") {
         const items = Array.from(
           el?.querySelectorAll<HTMLElement>(
@@ -165,10 +186,11 @@ function Modal({
       document.removeEventListener("keydown", key);
       previous?.focus();
     };
-  }, [onClose]);
+  }, []);
   return (
     <div
       className="modal-backdrop"
+      role="presentation"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -189,6 +211,12 @@ function Modal({
             <X size={20} />
           </IconButton>
         </header>
+        {error && (
+          <div className="alert modal-alert" role="alert">
+            <AlertCircle size={18} />
+            <span>{error}</span>
+          </div>
+        )}
         {children}
       </div>
     </div>
@@ -202,6 +230,7 @@ function CreateSlideshowModal({
   initialFormat,
   initialHook,
   busy,
+  error,
   onClose,
   onCreate,
   onOpenSettings,
@@ -210,17 +239,18 @@ function CreateSlideshowModal({
   initialFormat?: Format;
   initialHook?: string;
   busy: boolean;
+  error: string;
   onClose: () => void;
-  onCreate: (data: Record<string, unknown>) => Promise<void>;
+  onCreate: (data: Record<string, unknown>) => Promise<unknown>;
   onOpenSettings: () => void;
 }) {
-  const firstBrand =
-    state.brands.find((brand) => brand.id === initialFormat?.brandId) ??
-    state.brands[0];
   const firstFormat =
     initialFormat ??
     state.formats.find((format) => format.design === "photo") ??
     state.formats[0];
+  const firstBrand = state.brands.find(
+    (brand) => brand.id === defaultBrandId(state, firstFormat),
+  );
   const clampCount = (count: number) =>
     Math.max(2, Math.min(10, Math.round(count || 2)));
   const [brandId, setBrandId] = useState(firstBrand?.id || "");
@@ -266,6 +296,7 @@ function CreateSlideshowModal({
       subtitle="Choose your brief and format. Make it your own."
       onClose={onClose}
       wide={ideasOpen}
+      error={error}
     >
       <form
         onSubmit={(event) => {
@@ -419,6 +450,15 @@ function CreateSlideshowModal({
                   (format) => format.id === nextId,
                 );
                 if (next) setSlideCount(clampCount(next.slideCount));
+                // Follow the brand the chosen format is set up for.
+                if (next?.brandId && next.brandId !== brandId) {
+                  setBrandId(next.brandId);
+                  setSourceUrl(
+                    state.brands.find((brand) => brand.id === next.brandId)
+                      ?.destination || "",
+                  );
+                  setIdeas([]);
+                }
               }}
             >
               {state.formats.map((format) => (
@@ -476,11 +516,9 @@ function CreateSlideshowModal({
               onChange={(event) => setCollection(event.target.value)}
             >
               <option value="">Use the format’s image settings</option>
-              {[...new Set(state.assets.map((asset) => asset.collection))].map(
-                (name) => (
-                  <option key={name}>{name}</option>
-                ),
-              )}
+              {collectionsOf(state.assets).map((name) => (
+                <option key={name}>{name}</option>
+              ))}
             </select>
           </Field>
         </div>
@@ -538,22 +576,31 @@ function SlideImage({
   index?: number;
   className?: string;
 }) {
+  const src = imgUrl(post, index);
+  // Remember which render failed so a new revision gets a fresh attempt.
+  const [failed, setFailed] = useState("");
+  const slide = post.slides[index];
   return (
     <div
       className={`slide-image ${className}`}
       style={{
         aspectRatio: post.aspect === "portrait" ? "4 / 5" : "9 / 16",
-        background: post.slides[index]?.background,
+        background: slide?.background,
       }}
     >
-      <Image
-        unoptimized
-        src={imgUrl(post, index)}
-        alt={`Slide ${index + 1}: ${post.slides[index]?.title}`}
-        fill
-        sizes="(max-width: 800px) 90vw, 400px"
-        style={{ objectFit: "contain" }}
-      />
+      {failed === src ? (
+        <RenderFallback />
+      ) : (
+        <Image
+          unoptimized
+          src={src}
+          alt={`Slide ${index + 1}${slide?.title ? `: ${slide.title}` : ""}`}
+          fill
+          sizes="(max-width: 800px) 90vw, 400px"
+          style={{ objectFit: "contain" }}
+          onError={() => setFailed(src)}
+        />
+      )}
     </div>
   );
 }
@@ -575,7 +622,8 @@ export default function Studio() {
     [editorTab, setEditorTab] = useState<"text" | "post">("text"),
     [brandEdit, setBrandEdit] = useState<Partial<Brand> | null>(null),
     [formatEdit, setFormatEdit] = useState<Format | null>(null),
-    [upload, setUpload] = useState(false);
+    [upload, setUpload] = useState(false),
+    [assetEdit, setAssetEdit] = useState<Asset | null>(null);
   const refresh = useCallback(async () => {
     const r = await fetch("/api/studio");
     const data = await r.json();
@@ -583,22 +631,37 @@ export default function Studio() {
     setState(data);
   }, []);
   useEffect(() => {
-    refresh().catch((e) => setError(e.message));
-  }, [refresh]);
+    let alive = true;
+    fetch("/api/studio")
+      .then(async (r) => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error);
+        if (alive) setState(data);
+      })
+      .catch((e: Error) => {
+        if (alive) setError(e.message);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
   useEffect(() => {
     if (toast) {
       const t = setTimeout(() => setToast(""), 4500);
       return () => clearTimeout(t);
     }
   }, [toast]);
+  // Resolves to false on failure so forms can stay open with their message.
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
     setError("");
     try {
       await fn();
       await refresh();
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -612,14 +675,18 @@ export default function Studio() {
       </main>
     );
   const visible = state.posts.filter((p) => p.status !== "archived");
+  const deleted = state.posts.filter((p) => p.status === "archived");
   const review = visible.filter((p) => p.status === "needs_review");
   const published = visible.filter((p) => p.status === "published");
-  const posts = visible.filter(
+  const library = libraryAssets(state.assets);
+  const posts = (filter === "archived" ? deleted : visible).filter(
     (p) =>
       (view !== "Review queue" || p.status === "needs_review") &&
       (filter === "all" || p.status === filter) &&
       `${p.title} ${p.topic}`.toLowerCase().includes(search.toLowerCase()),
   );
+  // Errors from a form are shown inside its dialog, not behind the backdrop.
+  const pageModalOpen = create || !!brandEdit || upload || !!assetEdit;
   const navigate = (v: View) => {
     setView(v);
     setFilter("all");
@@ -629,16 +696,17 @@ export default function Studio() {
   const closeCreate = () => {
     setCreate(false);
     setCreateContext(null);
+    setError("");
   };
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <a className="wordmark" href="/" aria-label="Fieldwork home">
+        <Link className="wordmark" href="/" aria-label="Fieldwork home">
           <span className="brand-icon">
             <Leaf size={22} />
           </span>
           fieldwork<span className="wordmark-dot">®</span>
-        </a>
+        </Link>
         <div className="workspace">
           <span className="workspace-avatar">D</span>
           <div>
@@ -653,6 +721,8 @@ export default function Studio() {
             <button
               key={name}
               className={view === name ? "active" : ""}
+              title={name}
+              aria-current={view === name ? "page" : undefined}
               onClick={() => navigate(name)}
             >
               <Icon size={18} />
@@ -671,6 +741,8 @@ export default function Studio() {
           </div>
           <button
             className={view === "Settings" ? "settings active" : "settings"}
+            title="Settings"
+            aria-current={view === "Settings" ? "page" : undefined}
             onClick={() => navigate("Settings")}
           >
             <Settings2 size={18} />
@@ -706,7 +778,7 @@ export default function Studio() {
           </button>
         </header>
         <main className="content">
-          {error && (
+          {error && !pageModalOpen && (
             <div className="alert" role="alert">
               <AlertCircle size={18} />
               <span>{error}</span>
@@ -784,11 +856,7 @@ export default function Studio() {
               <button
                 className="button primary"
                 onClick={() =>
-                  setFormatEdit({
-                    ...state.formats[0],
-                    id: "",
-                    name: "My new format",
-                  })
+                  setFormatEdit(blankFormat(defaultBrandId(state)))
                 }
               >
                 <Plus size={18} />
@@ -820,14 +888,17 @@ export default function Studio() {
                     ["needs_review", "Needs review"],
                     ["approved", "Approved"],
                     ["published", "Published"],
+                    ...(deleted.length ? [["archived", "Deleted"]] : []),
                   ].map(([key, label]) => (
                     <button
                       key={key}
                       className={filter === key ? "selected" : ""}
+                      aria-pressed={filter === key}
                       onClick={() => setFilter(key)}
                     >
                       {label}
                       {key === "needs_review" && <span>{review.length}</span>}
+                      {key === "archived" && <span>{deleted.length}</span>}
                     </button>
                   ))}
                 </div>
@@ -877,6 +948,7 @@ export default function Studio() {
                 ))}
                 <button
                   className="new-post-card"
+                  hidden={filter === "archived"}
                   onClick={() => setCreate(true)}
                 >
                   <span>
@@ -889,6 +961,12 @@ export default function Studio() {
               {posts.length === 0 && search && (
                 <p className="empty-copy">
                   No posts match “{search}”. Try another search.
+                </p>
+              )}
+              {filter === "archived" && (
+                <p className="empty-copy">
+                  Deleted slideshows keep their revisions. Open one and choose
+                  Restore to bring it back for review.
                 </p>
               )}
             </section>
@@ -957,19 +1035,18 @@ export default function Studio() {
             </div>
           )}
           {view === "Assets" &&
-            (state.assets.length ? (
+            (library.length ? (
               <>
                 <div className="section-heading">
                   <h2>
-                    {state.assets.length} images{" "}
+                    {plural(library.length, "image")}{" "}
                     <span>
-                      · {new Set(state.assets.map((a) => a.collection)).size}{" "}
-                      collections
+                      · {plural(collectionsOf(library).length, "collection")}
                     </span>
                   </h2>
                 </div>
                 <div className="asset-grid">
-                  {state.assets.map((a) => (
+                  {library.map((a) => (
                     <article key={a.id} className="asset-card">
                       <div className="asset-image">
                         <Image
@@ -994,8 +1071,19 @@ export default function Studio() {
                           ) : (
                             <AlertCircle size={13} />
                           )}{" "}
-                          {a.rights || "Rights not recorded — cannot approve"}
+                          {a.rights ||
+                            "Rights not recorded: add them to approve"}
                         </span>
+                        <button
+                          className="text-button asset-edit"
+                          aria-label={`Edit ${a.name}`}
+                          onClick={() => {
+                            setError("");
+                            setAssetEdit(a);
+                          }}
+                        >
+                          <Pencil size={13} /> Edit details
+                        </button>
                       </div>
                     </article>
                   ))}
@@ -1035,6 +1123,8 @@ export default function Studio() {
             <Results
               posts={published}
               busy={busy}
+              error={error}
+              onClearError={() => setError("")}
               onSave={(id, data) =>
                 run(async () => {
                   await api("metrics", { id, data });
@@ -1126,6 +1216,7 @@ export default function Studio() {
           initialFormat={createContext?.format}
           initialHook={createContext?.hook}
           busy={busy}
+          error={error}
           onClose={closeCreate}
           onOpenSettings={() => {
             closeCreate();
@@ -1149,13 +1240,17 @@ export default function Studio() {
           title={
             brandEdit.id ? "Your brand, in a few words." : "Meet your brand."
           }
-          onClose={() => setBrandEdit(null)}
+          onClose={() => {
+            setBrandEdit(null);
+            setError("");
+          }}
+          error={error}
         >
           <form
             onSubmit={(e) => {
               e.preventDefault();
               const f = new FormData(e.currentTarget);
-              run(async () => {
+              void run(async () => {
                 await api("brand", {
                   data: { id: brandEdit.id, ...Object.fromEntries(f) },
                 });
@@ -1164,27 +1259,40 @@ export default function Studio() {
               });
             }}
           >
-            {[
-              ["name", "Brand name"],
-              ["product", "What do you offer?"],
-              ["audience", "Who is it for?"],
-              ["tone", "Voice & tone"],
-              ["facts", "Verified product facts"],
-              ["prohibited", "Claims to avoid"],
-              ["destination", "Destination / website"],
-            ].map(([key, label]) => (
-              <Field key={key} label={label}>
-                {["name", "tone", "destination"].includes(key) ? (
+            {(
+              [
+                ["name", "Brand name", 80],
+                ["product", "What do you offer?", 2000],
+                ["audience", "Who is it for?", 1000],
+                ["tone", "Voice & tone", 300],
+                ["facts", "Verified product facts", 3000],
+                ["prohibited", "Claims to avoid", 1000],
+                ["destination", "Destination / website", 500],
+              ] as const
+            ).map(([key, label, maxLength]) => (
+              <Field
+                key={key}
+                label={label}
+                hint={
+                  key === "destination"
+                    ? "A full web address, such as https://example.com"
+                    : undefined
+                }
+              >
+                {key === "name" || key === "tone" || key === "destination" ? (
                   <input
                     name={key}
-                    defaultValue={String(brandEdit[key as keyof Brand] || "")}
+                    type={key === "destination" ? "url" : "text"}
+                    maxLength={maxLength}
+                    defaultValue={String(brandEdit[key] || "")}
                     required={key === "name"}
                   />
                 ) : (
                   <textarea
                     name={key}
                     rows={2}
-                    defaultValue={String(brandEdit[key as keyof Brand] || "")}
+                    maxLength={maxLength}
+                    defaultValue={String(brandEdit[key] || "")}
                   />
                 )}
               </Field>
@@ -1238,15 +1346,20 @@ export default function Studio() {
         <Modal
           title="Gather your images."
           subtitle="JPEG, PNG, or WebP. Up to 20 MB per image."
-          onClose={() => setUpload(false)}
+          onClose={() => {
+            setUpload(false);
+            setError("");
+          }}
+          error={error}
         >
           <form
             onSubmit={(e) => {
               e.preventDefault();
               const data = new FormData(e.currentTarget);
               const files = data.getAll("file") as File[];
-              run(async () => {
-                let count = 0;
+              void run(async () => {
+                let added = 0,
+                  duplicates = 0;
                 for (const file of files) {
                   const fd = new FormData();
                   fd.set("file", file);
@@ -1256,15 +1369,21 @@ export default function Studio() {
                     method: "POST",
                     body: fd,
                   });
-                  const body = await r.json();
+                  const body = await r.json().catch(() => ({}));
                   if (!r.ok)
                     throw new Error(
-                      `${count} uploaded. ${file.name}: ${body.error}`,
+                      `${added ? `${plural(added, "image")} added. ` : ""}${file.name}: ${body.error || "Upload failed."}`,
                     );
-                  count++;
+                  if (body.duplicate) duplicates++;
+                  else added++;
                 }
                 setUpload(false);
-                setToast(`${count} images added to your library.`);
+                setToast(
+                  `${plural(added, "image")} added to your library.` +
+                    (duplicates
+                      ? ` ${plural(duplicates, "image")} already in that collection.`
+                      : ""),
+                );
               });
             }}
           >
@@ -1312,6 +1431,35 @@ export default function Studio() {
             </div>
           </form>
         </Modal>
+      )}
+      {assetEdit && (
+        <AssetModal
+          asset={assetEdit}
+          busy={busy}
+          error={error}
+          onClose={() => {
+            setAssetEdit(null);
+            setError("");
+          }}
+          onSave={(data) =>
+            run(async () => {
+              await api("asset", { id: assetEdit.id, data });
+              setAssetEdit(null);
+              setToast("Image details saved.");
+            })
+          }
+          onRemove={() =>
+            run(async () => {
+              const result = await api("removeAsset", { id: assetEdit.id });
+              setAssetEdit(null);
+              setToast(
+                result.kept
+                  ? "Removed from your library. Slideshows that use it keep it."
+                  : "Image deleted.",
+              );
+            })
+          }
+        />
       )}
       {editing && (
         <SlideshowEditor
@@ -1365,6 +1513,7 @@ function CalendarView({
   const [month, setMonth] = useState(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   );
+  const [today] = useState(() => new Date().toDateString());
   const start = new Date(month.getFullYear(), month.getMonth(), 1);
   const days = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
   const cells = Array.from(
@@ -1422,7 +1571,7 @@ function CalendarView({
           return (
             <div
               key={i}
-              className={`calendar-day ${d < 1 || d > days ? "outside" : ""} ${sameDay(new Date().toISOString()) ? "today" : ""}`}
+              className={`calendar-day ${d < 1 || d > days ? "outside" : ""} ${date.toDateString() === today ? "today" : ""}`}
             >
               <span>{date.getDate()}</span>
               {d > 0 &&
@@ -1560,25 +1709,39 @@ function CalendarView({
 function Results({
   posts,
   busy,
+  error,
+  onClearError,
   onSave,
 }: {
   posts: Post[];
   busy: boolean;
-  onSave: (id: string, data: Record<string, number | null>) => void;
+  error: string;
+  onClearError: () => void;
+  onSave: (id: string, data: Record<string, number | null>) => Promise<boolean>;
 }) {
   const [edit, setEdit] = useState<Post | null>(null);
+  const close = () => {
+    setEdit(null);
+    onClearError();
+  };
   const csv = () => {
+    // One row per snapshot, so growth over time survives the export.
     const rows = [
       ["Post", "URL", "Views", "Likes", "Comments", "Shares", "Measured at"],
-      ...posts.map((p) => [
-        p.title,
-        p.publishedUrl || "",
-        p.metrics?.views ?? "",
-        p.metrics?.likes ?? "",
-        p.metrics?.comments ?? "",
-        p.metrics?.shares ?? "",
-        p.metrics?.measuredAt || "",
-      ]),
+      ...posts.flatMap((p) => {
+        const snapshots = [...(p.metricsHistory ?? []), p.metrics].filter(
+          (m) => !!m,
+        );
+        return (snapshots.length ? snapshots : [undefined]).map((m) => [
+          p.title,
+          p.publishedUrl || "",
+          m?.views ?? "",
+          m?.likes ?? "",
+          m?.comments ?? "",
+          m?.shares ?? "",
+          m?.measuredAt || "",
+        ]);
+      }),
     ];
     const data = rows
       .map((row) =>
@@ -1657,10 +1820,15 @@ function Results({
                   {p.metrics
                     ? new Date(p.metrics.measuredAt).toLocaleDateString()
                     : "Not recorded"}
+                  {!!p.metricsHistory?.length && (
+                    <small>
+                      {plural(p.metricsHistory.length, "earlier snapshot")}
+                    </small>
+                  )}
                 </td>
                 <td>
                   <button className="text-button" onClick={() => setEdit(p)}>
-                    Add results
+                    {p.metrics ? "Record new snapshot" : "Add results"}
                   </button>
                 </td>
               </tr>
@@ -1671,14 +1839,15 @@ function Results({
       {edit && (
         <Modal
           title="Record a snapshot."
-          subtitle="Leave unknown values empty. All results are manually recorded."
-          onClose={() => setEdit(null)}
+          subtitle="Leave unknown values empty. Earlier snapshots are kept for comparison."
+          onClose={close}
+          error={error}
         >
           <form
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
               const f = new FormData(e.currentTarget);
-              onSave(
+              const saved = await onSave(
                 edit.id,
                 Object.fromEntries(
                   [...f.entries()].map(([k, v]) => [
@@ -1687,7 +1856,7 @@ function Results({
                   ]),
                 ),
               );
-              setEdit(null);
+              if (saved) setEdit(null);
             }}
           >
             {(["views", "likes", "comments", "shares"] as const).map((k) => (
@@ -1696,6 +1865,7 @@ function Results({
                   type="number"
                   name={k}
                   min={0}
+                  max={Number.MAX_SAFE_INTEGER}
                   step={1}
                   defaultValue={edit.metrics?.[k] ?? ""}
                 />
@@ -1710,5 +1880,101 @@ function Results({
         </Modal>
       )}
     </>
+  );
+}
+function AssetModal({
+  asset,
+  busy,
+  error,
+  onClose,
+  onSave,
+  onRemove,
+}: {
+  asset: Asset;
+  busy: boolean;
+  error: string;
+  onClose: () => void;
+  onSave: (data: { name: string; collection: string; rights: string }) => void;
+  onRemove: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <Modal
+      title="Image details."
+      subtitle="Rights recorded here are checked again when you approve."
+      onClose={onClose}
+      error={error}
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const f = new FormData(e.currentTarget);
+          onSave({
+            name: String(f.get("name")),
+            collection: String(f.get("collection")),
+            rights: String(f.get("rights")),
+          });
+        }}
+      >
+        <Field label="Name">
+          <input
+            name="name"
+            required
+            maxLength={150}
+            defaultValue={asset.name}
+          />
+        </Field>
+        <Field label="Collection name">
+          <input
+            name="collection"
+            required
+            maxLength={80}
+            defaultValue={asset.collection}
+          />
+        </Field>
+        <Field
+          label="Usage rights"
+          hint="Record ownership or the license that allows you to use this image."
+        >
+          <textarea
+            name="rights"
+            required
+            maxLength={1000}
+            rows={2}
+            defaultValue={asset.rights}
+          />
+        </Field>
+        <div className="modal-actions">
+          {confirming ? (
+            <button
+              type="button"
+              className="button danger"
+              disabled={busy}
+              onClick={onRemove}
+            >
+              Confirm removal
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="button secondary"
+              disabled={busy}
+              onClick={() => setConfirming(true)}
+            >
+              Remove from library
+            </button>
+          )}
+          <button className="button primary" disabled={busy}>
+            Save details
+          </button>
+        </div>
+        {confirming && (
+          <p className="form-note">
+            Slideshows that already use this image keep it. It will no longer
+            appear in pickers or collections.
+          </p>
+        )}
+      </form>
+    </Modal>
   );
 }

@@ -18,7 +18,7 @@ const { assertPublicWebsiteUrl, readWebsite } =
   await import("../src/lib/website");
 const original = store.list<import("../src/lib/schema").Post>("post")[0];
 after(() => {
-  store.db.close();
+  store.database().close();
   rmSync(folder, { recursive: true, force: true });
 });
 test("fresh workspaces include the Pobi brand brief", () => {
@@ -53,7 +53,8 @@ test("legacy format defaults above 10 migrate and record an audit event", () => 
       .slideCount,
     10,
   );
-  const audit = store.db
+  const audit = store
+    .database()
     .prepare("SELECT COUNT(*) AS count FROM audit WHERE action=? AND entity=?")
     .get("format.slide_count_capped", format.id) as { count: number };
   assert.equal(audit.count, 1);

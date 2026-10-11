@@ -16,13 +16,15 @@ The app works without an AI provider. To enable website ideas and AI writing, co
 ## Current workflow
 
 1. Review the included Pobi brand brief and update it whenever product details or pricing change.
-2. Upload images you own or are licensed to use, recording their rights.
+2. Upload images you own or are licensed to use, recording their rights. **Edit details** on an image updates its name, collection, or rights; removing an image hides it from pickers while slideshows that already use it keep it.
 3. Create a manual or AI-assisted draft from a reusable format.
 4. Edit the slide copy, layout, colors, background images, caption, account, and planned time.
 5. Render the final JPEG preview and approve that exact revision.
-6. Download the ZIP, publish it manually in TikTok, and record the public URL and metrics.
+6. Download the ZIP, publish it manually in TikTok, and record the public URL (a `tiktok.com` or `vm.tiktok.com` share link) and metrics. Each results entry is kept as a snapshot; the CSV export has one row per snapshot.
 
-Edits after approval create a new revision and revoke approval. A ZIP cannot be downloaded until its current render is approved.
+Edits after approval create a new revision and revoke approval. The planned posting time is part of the approval, so **Add to queue** on an approved post offers **Save and approve again**. A ZIP cannot be downloaded until its current render is approved.
+
+**Delete** moves a slideshow to the **Deleted** tab, where it can be restored for review. Published posts can't be deleted: they stay in Results with their link and metrics. A recorded TikTok link can be changed only through **Correct TikTok link**.
 
 ## Format dashboards
 
@@ -60,8 +62,11 @@ Stop the app and back up the entire `data/` directory together. Set `STUDIO_DATA
 
 ```bash
 npm run typecheck
+npm run lint
 npm test
 npm run build
 ```
+
+CI (`.github/workflows/ci.yml`) runs these plus a Prettier check and `npm audit --omit=dev` on every pull request. Linting uses [oxlint](https://oxc.rs), because `typescript-eslint` does not support TypeScript 7.
 
 The first release covers local authoring and manual export. Recurring generation, MP4 export, cloud authentication, and publishing-provider integration remain later milestones in [PRD.md](./PRD.md).

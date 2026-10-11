@@ -26,7 +26,7 @@ export async function GET(
       throw new StudioError("Post changed during export.", 409);
     const slide = req.nextUrl.searchParams.get("slide");
     if (slide !== null) {
-      const i = Number(slide);
+      const i = /^\d+$/.test(slide) ? Number(slide) : NaN;
       if (!Number.isInteger(i) || !buffers[i])
         throw new StudioError("Unknown slide", 404);
       return new NextResponse(new Uint8Array(buffers[i]), {
@@ -75,9 +75,12 @@ export async function GET(
       },
     );
   } catch (e) {
+    if (e instanceof StudioError)
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    console.error("Export failed", e instanceof Error ? e.name : "Unknown");
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Export failed" },
-      { status: e instanceof StudioError ? e.status : 500 },
+      { error: "The export could not be created. Try again." },
+      { status: 500 },
     );
   }
 }

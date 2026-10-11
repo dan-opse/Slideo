@@ -30,6 +30,64 @@ export function photoFont(name: PhotoText["font"] = "default") {
     );
   return fonts.get(name)!;
 }
+// Output pixels per canvas unit (240 units -> 1080 px) for both aspects.
+const PIXELS_PER_UNIT = 1080 / 240;
+
+// Crops each photo to the part visible in its slot and resizes it to the
+// slot's output pixels before embedding. Embedding full-resolution originals
+// made librsvg decode up to four 2400 px images per slide and drove server
+// memory to several GB.
+async function slotImage(
+  slide: Slide,
+  slot: ReturnType<typeof imageSlots>[number],
+  index: number,
+) {
+  const data = await readFile(
+    path.join(dataDir, "assets", `${slot.id}.jpg`),
+  ).catch(() => {
+    throw new StudioError(
+      `Slide ${index + 1}: one of its images is missing from your library. Choose another image.`,
+      422,
+    );
+  });
+  const meta = await sharp(data).metadata();
+  const width = meta.width!,
+    height = meta.height!;
+  const rect = imageRect(slide, width, height, slot.height, slot.width);
+  const left = Math.max(0, rect.x),
+    top = Math.max(0, rect.y),
+    right = Math.min(slot.width, rect.x + rect.width),
+    bottom = Math.min(slot.height, rect.y + rect.height);
+  if (right <= left || bottom <= top) return "";
+  const sx = Math.max(0, Math.floor(((left - rect.x) / rect.width) * width)),
+    sy = Math.max(0, Math.floor(((top - rect.y) / rect.height) * height));
+  const crop = {
+    left: sx,
+    top: sy,
+    width: Math.max(
+      1,
+      Math.min(width - sx, Math.round(((right - left) / rect.width) * width)),
+    ),
+    height: Math.max(
+      1,
+      Math.min(
+        height - sy,
+        Math.round(((bottom - top) / rect.height) * height),
+      ),
+    ),
+  };
+  const pixels = await sharp(data)
+    .extract(crop)
+    .resize(
+      Math.max(1, Math.round((right - left) * PIXELS_PER_UNIT)),
+      Math.max(1, Math.round((bottom - top) * PIXELS_PER_UNIT)),
+      { fit: "fill" },
+    )
+    .jpeg({ quality: 95 })
+    .toBuffer();
+  return `<image href="data:image/jpeg;base64,${pixels.toString("base64")}" x="${slot.x + left}" y="${slot.y + top}" width="${right - left}" height="${bottom - top}" preserveAspectRatio="none"/>`;
+}
+
 export async function renderPhotoSlide(
   slide: Slide,
   aspect: PostContent["aspect"],
@@ -38,18 +96,7 @@ export async function renderPhotoSlide(
   const height = canvasHeight(aspect);
   let background = `<rect width="240" height="${height}" fill="${slide.background}"/>`;
   const slots = imageSlots(slide, height);
-  for (const slot of slots) {
-    const data = await readFile(path.join(dataDir, "assets", `${slot.id}.jpg`));
-    const meta = await sharp(data).metadata();
-    const rect = imageRect(
-      slide,
-      meta.width!,
-      meta.height!,
-      slot.height,
-      slot.width,
-    );
-    background += `<svg x="${slot.x}" y="${slot.y}" width="${slot.width}" height="${slot.height}" viewBox="0 0 ${slot.width} ${slot.height}" overflow="hidden"><image href="data:image/jpeg;base64,${data.toString("base64")}" x="${rect.x}" y="${rect.y}" width="${rect.width}" height="${rect.height}" preserveAspectRatio="none"/></svg>`;
-  }
+  for (const slot of slots) background += await slotImage(slide, slot, index);
   if (slots.length)
     background += `<rect width="240" height="${height}" fill="#000" opacity="${slide.overlay}"/>`;
   const texts = await Promise.all(
@@ -62,6 +109,7 @@ export async function renderPhotoSlide(
       )
         throw new StudioError(
           `Slide ${index + 1}: text does not fit its box or canvas. Increase the box height, reduce the size, or shorten the copy.`,
+          422,
         );
       return photoTextSvg(layer, font);
     }),

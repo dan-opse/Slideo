@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import {
-  db,
+  database,
   dailyLimit,
   dailyUsage,
   now,
@@ -121,11 +121,9 @@ function reserveAttempt() {
         "Daily AI call limit reached. Manual editing is still available.",
         429,
       );
-    db.prepare("INSERT INTO ai_attempts VALUES(?,?,?,NULL)").run(
-      id,
-      now(),
-      "reserved",
-    );
+    database()
+      .prepare("INSERT INTO ai_attempts VALUES(?,?,?,NULL)")
+      .run(id, now(), "reserved");
   });
   return id;
 }
@@ -146,11 +144,9 @@ function recordAttempt(
   status: "received" | "complete" | "failed",
   metadata: Record<string, unknown>,
 ) {
-  db.prepare("UPDATE ai_attempts SET status=?,usage=? WHERE id=?").run(
-    status,
-    JSON.stringify(metadata),
-    id,
-  );
+  database()
+    .prepare("UPDATE ai_attempts SET status=?,usage=? WHERE id=?")
+    .run(status, JSON.stringify(metadata), id);
 }
 
 function providerError(error: unknown): StudioError {
@@ -176,6 +172,17 @@ function providerError(error: unknown): StudioError {
     "OpenAI generation failed or returned invalid content. No content was saved; the attempt counts toward your daily limit.",
     502,
   );
+}
+
+// Checked before slow preparation (such as reading a website) so a missing key
+// or exhausted limit fails fast. The attempt itself is reserved later.
+export function assertAiAvailable() {
+  clientAndModel();
+  if (dailyUsage() >= dailyLimit())
+    throw new StudioError(
+      "Daily AI call limit reached. Manual editing is still available.",
+      429,
+    );
 }
 
 function clientAndModel() {

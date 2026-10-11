@@ -115,7 +115,17 @@
 .photo-gallery-card:hover .slide-count,
 .photo-gallery-card:focus-within .slide-count {
   opacity: 1;
+}
+/* Only real controls take clicks; the gradient passes them to the cover. */
+.photo-gallery .post-info button {
   pointer-events: auto;
+}
+/* Touch screens have no hover, so always show title and status there. */
+@media (hover: none) {
+  .photo-gallery .post-info,
+  .photo-gallery .slide-count {
+    opacity: 1;
+  }
 }
 .photo-gallery .post-meta {
   font-size: 10px;
@@ -142,7 +152,7 @@
 }
 .photo-backdrop {
   --photo-blue: #0084ff;
-  --photo-orange: #ff4c25;
+  --photo-orange: #e12800;
   position: fixed;
   inset: 0;
   z-index: 70;
@@ -193,7 +203,7 @@
   align-items: center;
 }
 .photo-save-state {
-  color: #555;
+  color: #484848;
   font-size: 11px;
 }
 .photo-tool {
@@ -250,7 +260,7 @@
 .photo-action.danger {
   background: #fff3f3;
   border-color: #ffcbcb;
-  color: #f0373d;
+  color: #dd1117;
 }
 .photo-editor-header .photo-action {
   border-radius: 8px;
@@ -489,7 +499,7 @@
   align-items: center;
   justify-content: center;
   gap: 9px;
-  color: #777;
+  color: #5d5d5d;
   font-size: 12px;
 }
 .preview-caption {
@@ -505,7 +515,7 @@
 .preview-caption span {
   display: block;
   font-size: 10px;
-  color: #999;
+  color: #757575;
   margin-top: 8px;
 }
 .preview-caption p {
@@ -530,7 +540,7 @@
 }
 .photo-dock-tabs button {
   padding: 4px 10px;
-  color: #777;
+  color: #5d5d5d;
   border-radius: 8px 8px 0 0;
   background: #d9d9d9;
   font-size: 12px;
@@ -553,7 +563,7 @@
   min-width: 0;
 }
 .photo-control > span {
-  color: #777;
+  color: #5d5d5d;
   font-size: 10px;
   font-weight: 500;
   white-space: nowrap;
@@ -626,7 +636,7 @@
   padding: 4px;
   border: 0;
   background: transparent;
-  color: #888;
+  color: #757575;
 }
 .photo-align .photo-tool[aria-pressed="true"] {
   background: #fff;
@@ -658,7 +668,7 @@
   align-items: center;
   justify-content: center;
   height: 36px;
-  color: #888;
+  color: #757575;
   font-size: 10px;
 }
 .photo-layer-nav .photo-tool {
@@ -699,7 +709,7 @@
   align-items: center;
   gap: 4px;
   font-size: 10px;
-  color: #555;
+  color: #484848;
 }
 .photo-slide-actions > span {
   margin-right: 5px;
@@ -735,7 +745,7 @@
   border-color: var(--photo-blue);
 }
 .photo-image-strip p {
-  color: #888;
+  color: #757575;
   font-size: 12px;
   padding: 15px 0;
 }
@@ -764,7 +774,7 @@
   flex-shrink: 0;
 }
 .photo-readonly {
-  color: #555;
+  color: #484848;
   font-size: 11px;
   margin-top: 6px;
   text-align: center;
@@ -785,7 +795,7 @@
 }
 .legacy-conversion p {
   font-size: 11px;
-  color: #888;
+  color: #757575;
 }
 .legacy-conversion button {
   flex-shrink: 0;
@@ -816,7 +826,7 @@
 }
 .photo-sheet p {
   font-size: 13px;
-  color: #777;
+  color: #5d5d5d;
   line-height: 1.6;
   margin-bottom: 18px;
 }
@@ -979,4 +989,17 @@
   .photo-post-fields {
     grid-template-columns: 1fr 1fr;
   }
+}
+
+.photo-note {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #5d6657;
+}
+.photo-sheet-warning {
+  background: #fff4e6;
+  border: 1px solid #f0d9b8;
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: #7a4a1c !important;
 }

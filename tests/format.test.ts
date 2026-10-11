@@ -37,6 +37,8 @@ const format: Format = {
     },
     body: {
       ...templateFor(base, "body"),
+      // Image-only slides: text hidden, background from the collection.
+      collection: "test-images",
       font: "regular",
       color: "#ffff00",
       style: "plain",
@@ -48,6 +50,8 @@ const format: Format = {
     cta: { ...templateFor(base, "cta"), size: 16, position: "bottom" },
   },
 };
+// The API only updates formats that exist; start from a stored copy of the preset.
+store.put<Format>("format", { ...base, id: format.id });
 const request = (body: Record<string, unknown>) =>
   POST(
     new NextRequest("http://localhost:3000/api/studio", {
@@ -61,7 +65,7 @@ const request = (body: Record<string, unknown>) =>
     }),
   );
 after(() => {
-  store.db.close();
+  store.database().close();
   rmSync(folder, { recursive: true, force: true });
 });
 
@@ -251,7 +255,8 @@ test("OpenAI hooks use the prompt without fetching a website and record normaliz
     assert.equal((await response.json()).hooks.length, 10);
     assert.equal(calls, 1);
     assert.equal(store.dailyUsage(), before + 1);
-    const row = store.db
+    const row = store
+      .database()
       .prepare(
         "SELECT status,usage FROM ai_attempts ORDER BY rowid DESC LIMIT 1",
       )
