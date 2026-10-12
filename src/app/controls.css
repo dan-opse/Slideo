@@ -1,0 +1,328 @@
+/* Shared control styling, built around the dropdown (components/ui). The
+   tokens live in globals.css :root so buttons use the same border, shadow
+   and pressed states. */
+
+/* Dropdown */
+.dropdown {
+  position: relative;
+  min-width: 0;
+  text-align: left;
+}
+.dropdown-field {
+  display: block;
+  width: 100%;
+}
+.dropdown-bare {
+  display: inline-block;
+}
+.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: var(--dropdown-h, 36px);
+  padding: 0 12px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--dropdown-radius, 9px);
+  background: #fff;
+  color: var(--control-text);
+  font-size: var(--dropdown-font, 13px);
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+  user-select: none;
+  box-shadow: var(--control-shadow);
+  transition:
+    box-shadow 0.15s,
+    border-color 0.15s,
+    background-color 0.15s;
+}
+.dropdown-trigger:hover:not(:disabled, .is-open) {
+  border-color: var(--control-border-hover);
+  box-shadow: var(--control-shadow-hover);
+}
+.dropdown-trigger:focus-visible:not(.is-open) {
+  border-color: var(--control-border-focus);
+  box-shadow: var(--control-shadow-focus);
+}
+.dropdown-trigger.is-open {
+  box-shadow: var(--control-shadow-pressed);
+}
+.dropdown-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dropdown-value.is-placeholder {
+  color: var(--control-muted);
+}
+.dropdown-chevron {
+  width: 12px;
+  height: 12px;
+  color: var(--control-muted);
+}
+.dropdown-bare .dropdown-trigger {
+  width: auto;
+  height: auto;
+  padding: 4px 6px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+.dropdown-bare .dropdown-trigger:hover:not(:disabled),
+.dropdown-bare .dropdown-trigger.is-open {
+  border-color: transparent;
+  background: var(--control-highlight);
+  box-shadow: none;
+}
+.dropdown-bare .dropdown-trigger:focus-visible:not(.is-open) {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.dropdown-menu {
+  position: fixed;
+  z-index: 1000;
+  padding: 5px;
+  border: 1px solid var(--control-border);
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: var(--menu-shadow);
+  color: var(--control-text);
+  font: 13px/1.4 var(--sans);
+  white-space: nowrap;
+}
+.dropdown-list {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  outline: none;
+  scrollbar-gutter: stable;
+}
+.dropdown-highlight {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 32px;
+  border-radius: 7px;
+  background: var(--control-highlight);
+  pointer-events: none;
+}
+.dropdown-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  color: var(--control-text);
+  cursor: default;
+  user-select: none;
+}
+.dropdown-item.is-active {
+  color: #1c1917;
+}
+.dropdown-item.is-disabled {
+  color: rgb(120 113 108 / 0.7);
+}
+.dropdown-item-text {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+.dropdown-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dropdown-item-hint {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--control-muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.dropdown-check {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 8px;
+}
+.dropdown-check svg {
+  width: 14px;
+  height: 14px;
+}
+.dropdown-empty {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 10px;
+  color: var(--control-muted);
+}
+
+/* Each form keeps its own control height so dropdowns line up with the
+   inputs beside them. */
+.field .dropdown {
+  --dropdown-h: 39px;
+  --dropdown-font: 12px;
+}
+.inspector .field .dropdown {
+  --dropdown-h: 34px;
+  --dropdown-font: 11px;
+}
+.fd-field .dropdown {
+  --dropdown-h: 38px;
+  --dropdown-font: 12px;
+}
+.photo-control .dropdown {
+  --dropdown-radius: 12px;
+}
+.photo-color .dropdown {
+  flex: 1;
+  min-width: 0;
+}
+.photo-color .dropdown-trigger {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px 0 4px;
+  border-radius: 0;
+  font-size: 13px;
+}
+.fd-brand .dropdown {
+  display: block;
+}
+.fd-brand .dropdown-trigger {
+  width: 100%;
+  margin-left: -6px;
+  padding: 2px 6px;
+  color: #1f1f1f;
+  font-size: 12px;
+  font-weight: 600;
+}
+.fd-recent .dropdown-trigger {
+  color: #606060;
+  font-size: 11px;
+}
+
+/* Scrollbars: thin stone thumbs everywhere, matching the dropdown list. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--scroll-thumb) padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scroll-thumb-hover);
+}
+
+/* Sliders: a hairline stone track with an ink fill and a raised thumb that
+   presses in while dragged, like the dropdown trigger. */
+input.slider[type="range"] {
+  --thumb: 16px;
+  --track: 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+}
+input.slider[type="range"]::-webkit-slider-runnable-track {
+  height: var(--track);
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--slider-fill)
+      calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--fill, 0)),
+    var(--control-border) 0
+  );
+}
+input.slider[type="range"]::-moz-range-track {
+  height: var(--track);
+  border-radius: 999px;
+  background: var(--control-border);
+}
+input.slider[type="range"]::-moz-range-progress {
+  height: var(--track);
+  border-radius: 999px;
+  background: var(--slider-fill);
+}
+input.slider[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: var(--thumb);
+  height: var(--thumb);
+  margin-top: calc((var(--track) - var(--thumb)) / 2);
+  border: 1px solid var(--control-border-hover);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--control-shadow);
+  transition:
+    transform 0.2s var(--ease-out),
+    box-shadow 0.15s,
+    border-color 0.15s;
+}
+input.slider[type="range"]::-moz-range-thumb {
+  box-sizing: border-box;
+  width: var(--thumb);
+  height: var(--thumb);
+  border: 1px solid var(--control-border-hover);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--control-shadow);
+  transition:
+    transform 0.2s var(--ease-out),
+    box-shadow 0.15s,
+    border-color 0.15s;
+}
+input.slider[type="range"]:hover::-webkit-slider-thumb {
+  border-color: var(--control-border-focus);
+  box-shadow: var(--control-shadow-hover);
+}
+input.slider[type="range"]:hover::-moz-range-thumb {
+  border-color: var(--control-border-focus);
+  box-shadow: var(--control-shadow-hover);
+}
+input.slider[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.12);
+  box-shadow: var(--control-shadow-pressed), var(--control-shadow);
+}
+input.slider[type="range"]:active::-moz-range-thumb {
+  transform: scale(1.12);
+  box-shadow: var(--control-shadow-pressed), var(--control-shadow);
+}
+input.slider[type="range"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+@media (max-width: 600px) {
+  .photo-control .dropdown {
+    --dropdown-font: 11px;
+  }
+  .photo-control .dropdown-trigger {
+    padding-inline: 6px;
+  }
+}

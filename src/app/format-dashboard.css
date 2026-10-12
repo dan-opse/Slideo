@@ -62,7 +62,7 @@
   font-size: 16px;
   flex-shrink: 0;
 }
-.fd-brand label {
+.fd-brand-picker {
   min-width: 0;
   flex: 1;
 }
@@ -71,15 +71,6 @@
   font-size: 11px;
   color: #616161;
   margin-bottom: 3px;
-}
-.fd-brand select {
-  width: 100%;
-  border: none;
-  background: transparent;
-  padding: 0;
-  color: #1f1f1f;
-  font-size: 12px;
-  font-weight: 600;
 }
 .fd-sidebar nav {
   display: flex;
@@ -188,7 +179,18 @@
   font-weight: 600;
   min-height: 36px;
   padding: 9px 15px;
-  border-radius: 8px;
+  border-radius: 9px;
+  box-shadow: var(--solid-shadow);
+  transition:
+    background-color 0.15s,
+    box-shadow 0.15s;
+}
+.fd-save:hover:not(:disabled) {
+  background: #262626;
+  box-shadow: var(--solid-shadow-hover);
+}
+.fd-save:active:not(:disabled) {
+  box-shadow: var(--solid-shadow-pressed);
 }
 .fd-page {
   border: 0;
@@ -291,13 +293,6 @@
   display: flex;
   align-items: center;
   gap: 15px;
-}
-.fd-recent select {
-  border: 0;
-  padding: 8px;
-  width: auto;
-  font-size: 11px;
-  color: #606060;
 }
 .fd-recent header button {
   background: transparent;
@@ -416,7 +411,6 @@
   font-weight: 500;
 }
 .fd-field input,
-.fd-field select,
 .fd-field textarea {
   width: 100%;
   border: 1px solid #e3e3e3;
@@ -429,18 +423,9 @@
 }
 /* One height for every single-line control, so rows line up. */
 .fd-field input:not([type="range"], [type="color"]),
-.fd-field select,
 .fd-color,
 .fd-range {
   height: 38px;
-}
-/* Native macOS selects ignore padding and height; draw our own arrow. */
-.fd-field select {
-  appearance: none;
-  padding-right: 32px;
-  background: #fff
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%23555' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 4.5 3 3 3-3'/%3E%3C/svg%3E")
-    no-repeat right 12px center;
 }
 .fd-color {
   display: flex;
@@ -487,10 +472,6 @@
 .fd-field input[type="color"] {
   height: 39px;
   padding: 5px;
-}
-.fd-field input[type="range"] {
-  padding: 0;
-  accent-color: #4c4c4c;
 }
 .fd-field small,
 .fd-help {
@@ -769,7 +750,10 @@
   color: #4a4a4a;
 }
 .fd-slide-actions button:hover:not(:disabled) {
-  background: #f2f2f2;
+  background: var(--control-highlight);
+}
+.fd-slide-actions button:active:not(:disabled) {
+  background: var(--control-border);
 }
 .fd-slide-actions button:disabled {
   opacity: 0.35;

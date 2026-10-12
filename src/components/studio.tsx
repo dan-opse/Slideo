@@ -47,6 +47,7 @@ import {
   plural,
 } from "@/lib/defaults";
 import { RenderFallback } from "./render-fallback";
+import { Dropdown } from "./ui/dropdown";
 type View =
   | "Overview"
   | "Review queue"
@@ -449,10 +450,15 @@ function CreateSlideshowModal({
 
         <div className="form-row">
           <Field label="Brand brief">
-            <select
+            <Dropdown
+              label="Brand brief"
+              placeholder="Choose a brand"
               value={brandId}
-              onChange={(event) => {
-                const nextId = event.target.value;
+              items={state.brands.map((brand) => ({
+                value: brand.id,
+                label: brand.name,
+              }))}
+              onChange={(nextId) => {
                 setBrandId(nextId);
                 setSourceUrl(
                   state.brands.find((brand) => brand.id === nextId)
@@ -461,19 +467,19 @@ function CreateSlideshowModal({
                 setIdeas([]);
                 setIdeaError("");
               }}
-            >
-              {state.brands.map((brand) => (
-                <option key={brand.id} value={brand.id}>
-                  {brand.name}
-                </option>
-              ))}
-            </select>
+            />
           </Field>
           <Field label="Format">
-            <select
+            <Dropdown
+              label="Format"
+              placeholder="Choose a format"
               value={formatId}
-              onChange={(event) => {
-                const nextId = event.target.value;
+              items={state.formats.map((format) => ({
+                value: format.id,
+                label: format.name,
+                hint: `${format.slideCount} slides`,
+              }))}
+              onChange={(nextId) => {
                 setFormatId(nextId);
                 setSelectedHook("");
                 const next = state.formats.find(
@@ -490,13 +496,7 @@ function CreateSlideshowModal({
                   setIdeas([]);
                 }
               }}
-            >
-              {state.formats.map((format) => (
-                <option key={format.id} value={format.id}>
-                  {format.name} · {format.slideCount} slides
-                </option>
-              ))}
-            </select>
+            />
           </Field>
         </div>
         {!!state.formats.find((format) => format.id === formatId)?.hooks
@@ -505,23 +505,21 @@ function CreateSlideshowModal({
             label="Opening hook"
             hint="A selected hook is kept exactly as written. Tone & Style applies to the other slides and caption."
           >
-            <select
+            <Dropdown
+              label="Opening hook"
               value={selectedHook}
-              onChange={(event) => {
-                setSelectedHook(event.target.value);
-                if (!topic || topic === selectedHook)
-                  setTopic(event.target.value);
+              items={[
+                { value: "", label: "Create a hook from the idea" },
+                ...(
+                  state.formats.find((format) => format.id === formatId)
+                    ?.hooks ?? []
+                ).map((hook) => ({ value: hook, label: hook })),
+              ]}
+              onChange={(hook) => {
+                setSelectedHook(hook);
+                if (!topic || topic === selectedHook) setTopic(hook);
               }}
-            >
-              <option value="">Create a hook from the idea</option>
-              {state.formats
-                .find((format) => format.id === formatId)
-                ?.hooks?.map((hook, index) => (
-                  <option key={`${index}-${hook}`} value={hook}>
-                    {hook}
-                  </option>
-                ))}
-            </select>
+            />
           </Field>
         )}
         <div className="form-row">
@@ -543,15 +541,18 @@ function CreateSlideshowModal({
             </Field>
           )}
           <Field label="Background collection">
-            <select
+            <Dropdown
+              label="Background collection"
               value={collection}
-              onChange={(event) => setCollection(event.target.value)}
-            >
-              <option value="">Use the format’s image settings</option>
-              {collectionsOf(state.assets).map((name) => (
-                <option key={name}>{name}</option>
-              ))}
-            </select>
+              items={[
+                { value: "", label: "Use the format’s image settings" },
+                ...collectionsOf(state.assets).map((name) => ({
+                  value: name,
+                  label: name,
+                })),
+              ]}
+              onChange={setCollection}
+            />
           </Field>
         </div>
         <p className="slide-count-note">
@@ -560,20 +561,24 @@ function CreateSlideshowModal({
           {structured && ", set by the format’s slide structure"}.
         </p>
         <Field label="Writing mode">
-          <select
+          <Dropdown
+            label="Writing mode"
             value={mode}
-            onChange={(event) => setMode(event.target.value as "manual" | "ai")}
-          >
-            <option value="manual">
-              Manual — start with an editable outline
-            </option>
-            <option value="ai" disabled={!state.settings.aiReady}>
-              AI writing{" "}
-              {state.settings.aiReady
-                ? "— use my OpenAI key"
-                : "— add credentials in Settings"}
-            </option>
-          </select>
+            items={[
+              {
+                value: "manual",
+                label: "Manual — start with an editable outline",
+              },
+              {
+                value: "ai",
+                label: state.settings.aiReady
+                  ? "AI writing — use my OpenAI key"
+                  : "AI writing — add credentials in Settings",
+                disabled: !state.settings.aiReady,
+              },
+            ]}
+            onChange={setMode}
+          />
         </Field>
         <p className="form-note">
           Every draft starts in Needs review. Nothing is published
