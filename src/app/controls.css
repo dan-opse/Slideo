@@ -234,6 +234,42 @@
   background-color: var(--scroll-thumb-hover);
 }
 
+/* ScrollRail (components/ui): a thin thumb with no track, drawn in place of
+   a container's native horizontal scrollbar. */
+.scroll-rail-target {
+  scrollbar-width: none;
+}
+.scroll-rail-target::-webkit-scrollbar {
+  display: none;
+}
+.scroll-rail {
+  position: relative;
+  height: 12px;
+  flex-shrink: 0;
+}
+.scroll-rail-thumb {
+  position: absolute;
+  top: 50%;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 999px;
+  background: rgb(28 25 23 / 0.28);
+  transition:
+    height 0.15s var(--ease-out),
+    margin-top 0.15s var(--ease-out),
+    background-color 0.15s;
+  touch-action: none;
+}
+.scroll-rail-thumb[hidden] {
+  display: none;
+}
+.scroll-rail:hover .scroll-rail-thumb,
+.scroll-rail-thumb.is-dragging {
+  height: 6px;
+  margin-top: -3px;
+  background: rgb(28 25 23 / 0.45);
+}
+
 /* Sliders: a hairline stone track with an ink fill and a raised thumb that
    presses in while dragged, like the dropdown trigger. */
 input.slider[type="range"] {
