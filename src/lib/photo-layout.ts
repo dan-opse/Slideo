@@ -7,7 +7,8 @@ export const FONT_FILES = {
   regular: "TikTokSans16pt-Regular.ttf",
 } as const;
 // Bump when photo pixels change so disk and browser caches use the same renderer.
-export const PHOTO_RENDER_VERSION = 3;
+// v4: invisible format characters are no longer drawn as missing glyphs.
+export const PHOTO_RENDER_VERSION = 4;
 export const canvasHeight = (aspect: PostContent["aspect"]) =>
   aspect === "story" ? 1920 / 4.5 : 300;
 export const clamp = (v: number, min: number, max: number) =>
@@ -165,11 +166,32 @@ export function layoutText(layer: PhotoText, font: Font) {
   };
 }
 
-// Outline and shadow strokes extend the drawn glyphs beyond their outlines.
+// How far a background blob extends around each line of text.
+const backgroundPadding = (layer: PhotoText) => ({
+  padX: layer.size * 0.34,
+  padY: layer.size * 0.16,
+});
+
+// Outline and shadow strokes extend the drawn glyphs beyond their outlines;
+// a background blob extends past every non-blank line by its padding.
 function effectBounds(
   layer: PhotoText,
-  ink: NonNullable<ReturnType<typeof layoutText>["ink"]>,
+  { ink, rows }: ReturnType<typeof layoutText>,
 ) {
+  if (!ink) return null;
+  if (layer.style === "box") {
+    const { padX, padY } = backgroundPadding(layer);
+    const lines = rows.filter((row) => row.width > 0);
+    return {
+      left: Math.min(ink.left, ...lines.map((row) => row.x - padX)),
+      top: Math.min(ink.top, ...lines.map((row) => row.top - padY)),
+      right: Math.max(
+        ink.right,
+        ...lines.map((row) => row.x + row.width + padX),
+      ),
+      bottom: Math.max(ink.bottom, ...lines.map((row) => row.bottom + padY)),
+    };
+  }
   if (layer.style === "outline") {
     const half = (layer.size * 0.13) / 2;
     return {
@@ -202,7 +224,7 @@ export function textProblem(layer: PhotoText, font: Font, height: number) {
     layer.y + layer.height > height + 0.1
   )
     return "Text does not fit its box or canvas. Increase the box size, reduce the text size, or shorten the copy.";
-  const drawn = layout.ink && effectBounds(layer, layout.ink);
+  const drawn = effectBounds(layer, layout);
   if (
     drawn &&
     (drawn.left < -0.1 ||
@@ -222,8 +244,7 @@ const round2 = (value: number) => Number(value.toFixed(2));
 // Blank lines split the text into separate blobs.
 export function backgroundPath(layer: PhotoText, font: Font) {
   const { rows } = layoutText(layer, font);
-  const padX = layer.size * 0.34,
-    padY = layer.size * 0.16,
+  const { padX, padY } = backgroundPadding(layer),
     lineHeight = layer.size * 1.12;
   const radius =
     ((layer.roundness ?? DEFAULT_ROUNDNESS) / 100) * (lineHeight / 2 + padY);

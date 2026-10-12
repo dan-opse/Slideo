@@ -1,7 +1,7 @@
 // Regression tests for the findings in CODE_REVIEW.md (2026-10-12).
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -16,8 +16,16 @@ const { GET: exportRoute } = await import("../src/app/api/export/[id]/route");
 const { GET: renderRoute } =
   await import("../src/app/api/render/[post]/[revision]/[slide]/route");
 const { renderPhotoSlide, photoFont } = await import("../src/lib/photo-render");
-const { canvasHeight, defaultText, fitText, layoutText, textProblem } =
-  await import("../src/lib/photo-layout");
+const {
+  canvasHeight,
+  defaultText,
+  fitText,
+  layoutText,
+  photoTextSvg,
+  PHOTO_RENDER_VERSION,
+  textProblem,
+} = await import("../src/lib/photo-layout");
+const { renderSlide } = await import("../src/lib/render");
 const { templateFor, templateSlide } =
   await import("../src/lib/format-template");
 const { postSchema } = await import("../src/lib/schema");
@@ -385,6 +393,119 @@ test("R06: unsupported characters are reported instead of drawn as boxes", async
   const clean = defaultText("Café — “quoted” it’s fine…­", "ok");
   assert.deepEqual(layoutText(clean, font).missing, []);
   assert.equal(textProblem(clean, font, 300), null);
+});
+
+test("R05/R06 gap A: cached JPEGs cannot skip render validation", async () => {
+  const created = (await create("tiktok-photo")).body as Post;
+  const content = store.contentOf(created);
+  const emoji = { ...defaultText("Nice 😀", "emoji"), y: 120, height: 40 };
+  content.slides[0] = { ...content.slides[0], textLayers: [emoji] };
+  const saved = await action({
+    action: "save",
+    id: created.id,
+    expected: created.revision,
+    data: content,
+  });
+  assert.equal(saved.status, 200, saved.body.error);
+  const post = saved.body as Post;
+  // What the unchecked baseline renderer cached: the emoji drawn as the
+  // font's missing-glyph shape, stored under both renderer versions.
+  const font = await photoFont();
+  const height = canvasHeight(post.aspect);
+  const cached = await sharp(
+    Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="${post.aspect === "story" ? 1920 : 1350}" viewBox="0 0 240 ${height}"><rect width="240" height="${height}"/>${photoTextSvg(emoji, font)}</svg>`,
+    ),
+  )
+    .jpeg()
+    .toBuffer();
+  mkdirSync(path.join(folder, "renders"), { recursive: true });
+  for (const version of [3, PHOTO_RENDER_VERSION])
+    writeFileSync(
+      path.join(
+        folder,
+        "renders",
+        `${post.id}-${post.revision}-0-photo-v${version}.jpg`,
+      ),
+      cached,
+    );
+  await assert.rejects(renderSlide(post.id, post.revision, 0), {
+    status: 422,
+    message: /Slide 1: The font can’t draw “😀”/,
+  });
+  const approval = await action({
+    action: "approve",
+    id: post.id,
+    revision: post.revision,
+  });
+  assert.equal(approval.status, 422);
+  assert.equal(store.get<Post>("post", post.id).status, "needs_review");
+  // An approval recorded from the cached bytes before validation existed
+  // cannot be exported either.
+  const others = await Promise.all(
+    post.slides
+      .slice(1)
+      .map((_, i) => renderSlide(post.id, post.revision, i + 1)),
+  );
+  store.approvePost(
+    post.id,
+    post.revision,
+    [cached, ...others].map(store.digest),
+  );
+  const exported = await exportAt(post.id, post.revision);
+  assert.equal(exported.status, 422);
+  assert.match((await exported.json()).error, /can’t draw/);
+  // Valid revisions keep rendering, approving and exporting from cache.
+  const fixed = await action({
+    action: "save",
+    id: post.id,
+    expected: post.revision,
+    data: {
+      ...store.contentOf(post),
+      slides: post.slides.map((slide, i) =>
+        i ? slide : { ...slide, textLayers: [{ ...emoji, text: "Nice" }] },
+      ),
+    },
+  });
+  assert.equal(fixed.status, 200, fixed.body.error);
+  const valid = fixed.body as Post;
+  assert.equal((await approve(valid)).status, "approved");
+  const first = await renderSlide(valid.id, valid.revision, 0);
+  assert.deepEqual(await renderSlide(valid.id, valid.revision, 0), first);
+  assert.equal((await exportAt(valid.id, valid.revision)).status, 200);
+});
+
+test("R05 gap B: background blobs past the canvas edge are rejected", async () => {
+  const font = await photoFont();
+  const layer = {
+    ...defaultText("W", "background-overflow"),
+    style: "box" as const,
+    size: 24,
+    align: "right" as const,
+    x: 210,
+    y: 50,
+    width: 30,
+    height: 40,
+  };
+  assert.match(textProblem(layer, font, 300) ?? "", /past the edge/);
+  await assert.rejects(renderPhotoSlide(photo([layer]), "portrait", 0), {
+    status: 422,
+  });
+  // Left, top and bottom edges too.
+  const left = { ...layer, align: "left" as const, x: 0 };
+  const top = { ...layer, align: "center" as const, x: 100, y: 0 };
+  // The box ends exactly at the canvas edge; its blob's padding does not.
+  const bottom = { ...top, y: 300 - 28, height: 28 };
+  for (const edge of [left, top, bottom])
+    assert.match(textProblem(edge, font, 300) ?? "", /past the edge/);
+  // The same glyph without a background, and ordinary background layers
+  // away from the edges, still render.
+  assert.equal(textProblem({ ...layer, style: "plain" }, font, 300), null);
+  const ordinary = { ...layer, align: "center" as const, x: 100 };
+  assert.equal(textProblem(ordinary, font, 300), null);
+  await renderPhotoSlide(photo([ordinary]), "portrait", 0);
+  const copy = defaultText("Ordinary background copy", "box");
+  assert.equal(textProblem({ ...copy, style: "box" }, font, 300), null);
 });
 
 test("R07: hidden grid references cannot approve a blank slide", async () => {

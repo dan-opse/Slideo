@@ -3,7 +3,7 @@ import { access, readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { dataDir, digest, get, revisionContent, StudioError } from "./store";
 import type { Asset } from "./schema";
-import { renderPhotoSlide } from "./photo-render";
+import { assertPhotoRenderable, renderPhotoSlide } from "./photo-render";
 import { PHOTO_RENDER_VERSION } from "./photo-layout";
 const escape = (s: string) =>
   s.replace(
@@ -30,6 +30,8 @@ export async function renderSlide(
     "renders",
     `${postId}-${revision}-${index}${s.design === "photo" ? `-photo-v${PHOTO_RENDER_VERSION}` : ""}.jpg`,
   );
+  if (s.design === "photo")
+    await assertPhotoRenderable(s, content.aspect, index);
   try {
     return await readFile(file);
   } catch {}
