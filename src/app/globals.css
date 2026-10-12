@@ -1437,25 +1437,6 @@ nav button svg {
   margin-top: 23px;
   padding-top: 20px;
 }
-.upload-zone {
-  padding: 30px 18px;
-  border: 1px dashed #d0d0d0;
-  border-radius: 8px;
-  background: #f2f2f2;
-  display: flex;
-  align-items: center;
-  flex-direction: column;
-  gap: 15px;
-  margin-bottom: 25px;
-  color: #585858;
-}
-.upload-zone strong {
-  font-size: 13px;
-}
-.upload-zone input {
-  background: white;
-  font-size: 11px;
-}
 .calendar {
   background: #fff;
   border: 1px solid var(--line);
