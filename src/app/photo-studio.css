@@ -128,7 +128,7 @@
   }
 }
 .photo-gallery .post-meta {
-  font-size: 10px;
+  font-size: 11px;
 }
 .photo-gallery .post-title {
   color: white;
@@ -417,25 +417,39 @@
   flex-shrink: 0;
 }
 .photo-pagination .photo-tool {
-  padding: 2px;
+  padding: 5px;
   border: 0;
   background: #fff9;
-  min-height: 22px;
+  min-height: 28px;
   border-radius: 50%;
 }
+/* Dots stay small but sit on a 24px pitch with a 24px hit area each. */
 .photo-dots {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 16px;
 }
 .photo-dots button {
+  position: relative;
   padding: 0;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: 999px;
   background: #dedede;
 }
+.photo-dots button::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+}
+/* The current slide is a wider pill, so it isn't marked by colour alone. */
 .photo-dots button.selected {
+  width: 18px;
+  margin-inline: -5px;
   background: #fff;
 }
 .photo-zoom {
@@ -514,7 +528,7 @@
 }
 .preview-caption span {
   display: block;
-  font-size: 10px;
+  font-size: 11px;
   color: #616161;
   margin-top: 8px;
 }
@@ -564,7 +578,7 @@
 }
 .photo-control > span {
   color: #474747;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   white-space: nowrap;
 }
@@ -676,7 +690,7 @@
   justify-content: center;
   height: 36px;
   color: #616161;
-  font-size: 10px;
+  font-size: 11px;
 }
 .photo-layer-nav .photo-tool {
   border: 0;
@@ -701,7 +715,7 @@
 }
 .photo-dock-footer button {
   background: transparent;
-  font-size: 10px;
+  font-size: 11px;
   color: #5b5b5b;
   padding: 1px 0;
   display: flex;
@@ -715,7 +729,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: 11px;
   color: #323232;
 }
 .photo-slide-actions > span {
@@ -723,7 +737,7 @@
 }
 .photo-slide-actions .photo-tool {
   min-height: 22px;
-  font-size: 10px;
+  font-size: 11px;
   padding: 2px 6px;
   background: #ddd;
   border: 0;
@@ -975,15 +989,15 @@
     gap: 7px;
   }
   .photo-preview-actions .photo-action {
-    font-size: 10px;
+    font-size: 11px;
     padding: 6px;
     gap: 6px;
   }
   .photo-jump {
-    font-size: 10px;
+    font-size: 11px;
   }
   .preview-caption {
-    font-size: 10px;
+    font-size: 11px;
     padding: 8px 0;
   }
   .is-preview .photo-track {

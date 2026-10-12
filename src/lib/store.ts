@@ -249,7 +249,7 @@ export function archivePost(id: string) {
     // Published posts carry the URL and results; archiving would hide them for good.
     if (post.status === "published")
       throw new StudioError(
-        "Published posts stay in Results and can't be deleted. Duplicate it to start a new version.",
+        "Published posts stay in Analytics and can't be deleted. Duplicate it to start a new version.",
         409,
       );
     if (post.status === "archived") return post;

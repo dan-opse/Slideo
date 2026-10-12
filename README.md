@@ -24,7 +24,7 @@ The app works without an AI provider. To enable website ideas and AI writing, co
 
 Edits after approval create a new revision and revoke approval. The planned posting time is part of the approval, so **Add to queue** on an approved post offers **Save and approve again**. A ZIP cannot be downloaded until its current render is approved.
 
-**Delete** moves a slideshow to the **Deleted** tab, where it can be restored for review. Published posts can't be deleted: they stay in Results with their link and metrics. A recorded TikTok link can be changed only through **Correct TikTok link**.
+**Delete** moves a slideshow to the **Deleted** tab, where it can be restored for review. Published posts can't be deleted: they stay in Analytics with their link and metrics. A recorded TikTok link can be changed only through **Correct TikTok link**.
 
 ## Format dashboards
 

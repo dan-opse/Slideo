@@ -50,7 +50,7 @@ import {
 import { PhotoCanvas, usePhotoFonts } from "./photo-canvas";
 import { NumberInput } from "./number-input";
 import { arrowStep } from "./keys";
-import { collectionsOf, libraryAssets } from "@/lib/defaults";
+import { collectionsOf, libraryAssets, plural } from "@/lib/defaults";
 
 async function request(action: string, data: Record<string, unknown> = {}) {
   const response = await fetch("/api/studio", {
@@ -787,7 +787,7 @@ export default function SlideshowEditor({
               <div className="preview-caption">
                 <strong>{post.title}</strong>
                 <span>
-                  {post.slides.length} slides ·{" "}
+                  {plural(post.slides.length, "slide")} ·{" "}
                   {
                     {
                       needs_review: "Needs review",
@@ -830,7 +830,7 @@ export default function SlideshowEditor({
                 </button>
               ) : saved.status === "published" ? (
                 <p className="photo-note delete-post">
-                  Published posts stay in Results with their link and metrics.
+                  Published posts stay in Analytics with their link and metrics.
                 </p>
               ) : (
                 <button
