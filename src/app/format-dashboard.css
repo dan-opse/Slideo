@@ -68,7 +68,7 @@
 }
 .fd-brand small {
   display: block;
-  font-size: 10px;
+  font-size: 11px;
   color: #616161;
   margin-bottom: 3px;
 }
@@ -112,10 +112,6 @@
 .fd-sidebar nav button:hover {
   background: #ededed;
 }
-.fd-sidebar nav button:nth-child(2),
-.fd-sidebar nav button:nth-child(4) {
-  margin-top: 10px;
-}
 .fd-sidebar nav small {
   font-size: inherit;
 }
@@ -132,7 +128,7 @@
 }
 .fd-sidebar-bottom > small {
   display: block;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.6;
   margin-top: 8px;
 }
@@ -165,7 +161,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 10px;
+  font-size: 11px;
   color: #606060;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -178,7 +174,7 @@
   flex-shrink: 0;
 }
 .fd-toolbar small {
-  font-size: 10px;
+  font-size: 11px;
   color: #606060;
 }
 .fd-save {
@@ -262,8 +258,8 @@
 }
 .fd-profile h1 button {
   background: transparent;
-  color: #969696;
-  padding: 3px;
+  color: var(--muted);
+  padding: 6px;
 }
 .fd-profile p {
   font-size: 12px;
@@ -335,7 +331,7 @@
   background: linear-gradient(transparent, #000a);
   color: #fff;
   text-align: center;
-  font-size: 10px;
+  font-size: 11px;
   padding: 30px 8px 9px;
 }
 .fd-post strong {
@@ -347,7 +343,7 @@
 }
 .fd-post small {
   color: #747474;
-  font-size: 10px;
+  font-size: 11px;
 }
 .fd-empty {
   text-align: center;
@@ -395,7 +391,9 @@
   margin-bottom: 25px;
 }
 .fd-tabs button {
-  padding: 0 0 12px;
+  /* Side padding widens short tabs like "CTA" to a usable hit area. */
+  padding: 0 4px 12px;
+  margin-inline: -4px;
   background: transparent;
   border-bottom: 2px solid transparent;
   color: #5a5a5a;
@@ -497,7 +495,7 @@
 .fd-field small,
 .fd-help {
   color: #5c5c5c;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
 }
 .fd-field-row {
@@ -586,7 +584,7 @@
   border-radius: 4px;
 }
 .fd-collection-strip small {
-  font-size: 10px;
+  font-size: 12px;
   color: #5a5a5a;
   line-height: 1.6;
 }
@@ -651,7 +649,7 @@
   padding: 12px 22px 0;
 }
 .fd-template-stage > header > span {
-  font-size: 9px;
+  font-size: 11px;
   color: #363636;
   letter-spacing: 0.1em;
 }
@@ -881,7 +879,6 @@
   }
   .fd-sidebar nav button {
     flex-shrink: 0;
-    margin: 0 !important;
     min-height: 36px;
     padding: 7px 10px;
     font-size: 11px;

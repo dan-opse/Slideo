@@ -54,7 +54,7 @@ type View =
   | "Assets"
   | "Brands"
   | "Calendar"
-  | "Results"
+  | "Analytics"
   | "Settings";
 const views: { name: View; icon: typeof LayoutDashboard }[] = [
   { name: "Overview", icon: LayoutDashboard },
@@ -63,7 +63,7 @@ const views: { name: View; icon: typeof LayoutDashboard }[] = [
   { name: "Assets", icon: FolderOpen },
   { name: "Brands", icon: FileText },
   { name: "Calendar", icon: CalendarDays },
-  { name: "Results", icon: BarChart3 },
+  { name: "Analytics", icon: BarChart3 },
 ];
 const statusLabel = {
   needs_review: "Needs review",
@@ -604,10 +604,13 @@ function SlideImage({
   post,
   index = 0,
   className = "",
+  eager = false,
 }: {
   post: Post;
   index?: number;
   className?: string;
+  // Above-the-fold covers load immediately; they are the page's largest paint.
+  eager?: boolean;
 }) {
   const src = imgUrl(post, index);
   // Remember which render failed so a new revision gets a fresh attempt.
@@ -630,6 +633,7 @@ function SlideImage({
           alt={`Slide ${index + 1}${slide?.title ? `: ${slide.title}` : ""}`}
           fill
           sizes="(max-width: 800px) 90vw, 400px"
+          loading={eager ? "eager" : "lazy"}
           style={{ objectFit: "contain" }}
           onError={() => setFailed(src)}
         />
@@ -733,6 +737,9 @@ export default function Studio() {
   };
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main">
+        Skip to main content
+      </a>
       <aside className="sidebar">
         <Link className="wordmark" href="/" aria-label="Slideo home">
           <span className="brand-icon">
@@ -810,7 +817,7 @@ export default function Studio() {
             D
           </button>
         </header>
-        <main className="content">
+        <main className="content" id="main" tabIndex={-1}>
           {error && !pageModalOpen && (
             <div className="alert" role="alert">
               <AlertCircle size={18} />
@@ -836,8 +843,8 @@ export default function Studio() {
                           ? "Your brands."
                           : view === "Calendar"
                             ? "Your calendar."
-                            : view === "Results"
-                              ? "Your results."
+                            : view === "Analytics"
+                              ? "Your analytics."
                               : "Settings."}
               </h1>
               <p>
@@ -853,7 +860,7 @@ export default function Studio() {
                           ? "The facts, audience, and tone behind every draft."
                           : view === "Calendar"
                             ? "Your planned posting dates. Publishing stays in your hands."
-                            : view === "Results"
+                            : view === "Analytics"
                               ? "Owner-recorded results from your published posts."
                               : "A private, local workspace built around your process."}
               </p>
@@ -937,17 +944,17 @@ export default function Studio() {
                 </div>
               )}
               <div className="post-grid photo-gallery">
-                {posts.map((p) => (
+                {posts.map((p, i) => (
                   <article key={p.id} className="post-card photo-gallery-card">
                     <button
                       className="post-art"
                       aria-label={`Preview ${p.title}`}
                       onClick={() => setEditing(p)}
                     >
-                      <SlideImage post={p} />
+                      <SlideImage post={p} eager={i < 4} />
                       <span className="slide-count">
                         <Layers3 size={12} />
-                        {p.slides.length} slides
+                        {plural(p.slides.length, "slide")}
                       </span>
                     </button>
                     <div className="post-info">
@@ -1010,6 +1017,7 @@ export default function Studio() {
                 <article className="format-card" key={f.id}>
                   <button
                     className={`format-preview ${f.font === "tiktok" ? "photo-format" : ""}`}
+                    aria-label={`Open ${f.name}`}
                     style={{
                       background: f.color,
                       color: f.ink,
@@ -1033,7 +1041,7 @@ export default function Studio() {
                     </small>
                   </button>
                   <div>
-                    <h3>{f.name}</h3>
+                    <h2>{f.name}</h2>
                     <p>{f.description}</p>
                     <button
                       className="text-button"
@@ -1152,7 +1160,7 @@ export default function Studio() {
               }}
             />
           )}
-          {view === "Results" && (
+          {view === "Analytics" && (
             <Results
               posts={published}
               busy={busy}
@@ -1691,7 +1699,7 @@ function CalendarView({
                   <div>
                     <dt>Slideshow</dt>
                     <dd>
-                      {selected.slides.length} slides ·{" "}
+                      {plural(selected.slides.length, "slide")} ·{" "}
                       {selected.aspect === "story" ? "9:16" : "4:5"}
                     </dd>
                   </div>
@@ -1812,7 +1820,7 @@ function Results({
   return (
     <>
       <div className="section-heading">
-        <h2>{posts.length} published posts</h2>
+        <h2>{plural(posts.length, "published post")}</h2>
         <button className="button secondary" onClick={csv}>
           <Download size={16} />
           Export CSV
