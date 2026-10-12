@@ -1,4 +1,4 @@
-// Regression tests for the findings in CODE_REVIEW.md (2026-10-12).
+// Regression tests for the 2026-10-12 code review findings (R01–R12).
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
