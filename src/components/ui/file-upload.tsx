@@ -81,7 +81,7 @@ export function FileUpload({
       wrongType.length &&
         `${wrongType.length === 1 ? wrongType[0].name : `${wrongType.length} files`} ${wrongType.length === 1 ? "isn't" : "aren't"} a supported type`,
       tooBig.length &&
-        `${tooBig.length === 1 ? tooBig[0].name : `${tooBig.length} files`} ${tooBig.length === 1 ? "is" : "are"} over ${formatFileSize(maxSize ?? 0)}`,
+        `${tooBig.length === 1 ? tooBig[0].name : `${tooBig.length} files`} ${tooBig.length === 1 ? "is" : "are"} over ${formatFileSize(maxSize ?? 0)} and won't be uploaded`,
     ].filter(Boolean);
     setError(problems.length ? `${problems.join("; ")}.` : null);
 
