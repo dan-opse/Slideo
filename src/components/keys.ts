@@ -1,5 +1,5 @@
 // Left/Right arrows step between slides, except while a field that uses the
-// arrows itself (text caret, slider, select, dropdown) has focus or a modifier
+// arrows itself (text caret, slider, select, dropdown, color area) has focus or a modifier
 // is held.
 export function arrowStep(event: KeyboardEvent): -1 | 0 | 1 {
   if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
@@ -10,7 +10,7 @@ export function arrowStep(event: KeyboardEvent): -1 | 0 | 1 {
   const target = event.target as HTMLElement | null;
   if (
     target?.closest?.(
-      "input, textarea, select, [contenteditable='true'], [role='listbox'], [aria-haspopup='listbox']",
+      "input, textarea, select, [contenteditable='true'], [role='listbox'], [role='slider'], [aria-haspopup='listbox']",
     )
   )
     return 0;

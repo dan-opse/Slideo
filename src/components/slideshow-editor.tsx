@@ -50,6 +50,7 @@ import {
 import { PhotoCanvas, usePhotoFonts } from "./photo-canvas";
 import { NumberInput } from "./number-input";
 import { arrowStep } from "./keys";
+import { ColorPicker } from "./ui/color-picker";
 import { Dropdown } from "./ui/dropdown";
 import { Slider } from "./ui/slider";
 import { canvasItems, fontItems, positionItems, styleItems } from "./options";
@@ -1052,13 +1053,10 @@ export default function SlideshowEditor({
                         />
                         <Control label="Color">
                           <div className="photo-color">
-                            <input
-                              type="color"
+                            <ColorPicker
+                              label="Custom text color"
                               value={layer.color}
-                              aria-label="Custom text color"
-                              onChange={(event) =>
-                                patchLayer({ color: event.target.value })
-                              }
+                              onChange={(color) => patchLayer({ color })}
                             />
                             <Dropdown
                               variant="bare"
@@ -1089,15 +1087,11 @@ export default function SlideshowEditor({
                         <Control label="Style">
                           <div className="photo-color">
                             {layer.style !== "plain" && (
-                              <input
-                                type="color"
+                              <ColorPicker
+                                label={`${layer.style === "box" ? "Background" : layer.style === "shadow" ? "Shadow" : "Outline"} color`}
                                 value={layer.styleColor ?? "#000000"}
-                                aria-label={`${layer.style === "box" ? "Background" : layer.style === "shadow" ? "Shadow" : "Outline"} color`}
-                                onChange={(event) => {
-                                  const next = recolorStyle(
-                                    layer,
-                                    event.target.value,
-                                  );
+                                onChange={(styleColor) => {
+                                  const next = recolorStyle(layer, styleColor);
                                   patchLayer({
                                     styleColor: next.styleColor,
                                     color: next.color,
@@ -1448,12 +1442,11 @@ export default function SlideshowEditor({
                       onChange={(value) => patch({ overlay: value / 100 })}
                     />
                     <Control label="Background">
-                      <input
-                        type="color"
+                      <ColorPicker
+                        variant="field"
+                        label="Background"
                         value={slide.background}
-                        onChange={(event) =>
-                          patch({ background: event.target.value })
-                        }
+                        onChange={(background) => patch({ background })}
                       />
                     </Control>
                   </div>
