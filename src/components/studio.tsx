@@ -48,6 +48,7 @@ import {
 } from "@/lib/defaults";
 import { RenderFallback } from "./render-fallback";
 import { Dropdown } from "./ui/dropdown";
+import { FileUpload } from "./ui/file-upload";
 type View =
   | "Overview"
   | "Review queue"
@@ -665,6 +666,7 @@ export default function Studio() {
     [brandEdit, setBrandEdit] = useState<Partial<Brand> | null>(null),
     [formatEdit, setFormatEdit] = useState<Format | null>(null),
     [upload, setUpload] = useState(false),
+    [uploadFiles, setUploadFiles] = useState<File[]>([]),
     [assetEdit, setAssetEdit] = useState<Asset | null>(null);
   const refresh = useCallback(async () => {
     const r = await fetch("/api/studio");
@@ -1394,6 +1396,7 @@ export default function Studio() {
           subtitle="JPEG, PNG, or WebP. Up to 20 MB per image."
           onClose={() => {
             setUpload(false);
+            setUploadFiles([]);
             setError("");
           }}
           error={error}
@@ -1401,12 +1404,15 @@ export default function Studio() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              if (!uploadFiles.length) {
+                setError("Choose at least one image to upload.");
+                return;
+              }
               const data = new FormData(e.currentTarget);
-              const files = data.getAll("file") as File[];
               void run(async () => {
                 let added = 0,
                   duplicates = 0;
-                for (const file of files) {
+                for (const file of uploadFiles) {
                   const fd = new FormData();
                   fd.set("file", file);
                   fd.set("collection", String(data.get("collection")));
@@ -1424,6 +1430,7 @@ export default function Studio() {
                   else added++;
                 }
                 setUpload(false);
+                setUploadFiles([]);
                 setToast(
                   `${plural(added, "image")} added to your library.` +
                     (duplicates
@@ -1433,18 +1440,18 @@ export default function Studio() {
               });
             }}
           >
-            <div className="upload-zone">
-              <Upload size={30} />
-              <strong>Give your ideas a backdrop.</strong>
-              <input
-                aria-label="Choose images"
-                type="file"
-                name="file"
-                required
-                multiple
-                accept="image/jpeg,image/png,image/webp"
-              />
-            </div>
+            <FileUpload
+              files={uploadFiles}
+              onFilesChange={(files) => {
+                setUploadFiles(files);
+                setError("");
+              }}
+              accept="image/jpeg,image/png,image/webp"
+              maxSize={20 * 1024 * 1024}
+              disabled={busy}
+              label="Drop images here or click to browse"
+              hint="JPEG, PNG or WebP • Up to 20 MB each"
+            />
             <Field label="Collection name">
               <input
                 name="collection"
