@@ -1454,6 +1454,7 @@ export default function Studio() {
               void run(async () => {
                 await api("brand", {
                   data: { id: brandEdit.id, ...Object.fromEntries(f) },
+                  expected: brandEdit.version ?? 0,
                 });
                 setBrandEdit(null);
                 setToast("Brand brief saved.");
@@ -1513,9 +1514,10 @@ export default function Studio() {
           state={state}
           suspended={!!editing || create}
           onClose={() => setFormatEdit(null)}
-          onSave={async (format) => {
+          onSave={async (format, expected) => {
             const saved = await api("format", {
               data: { ...format, id: format.id || undefined },
+              expected,
             });
             await refresh();
             return saved;

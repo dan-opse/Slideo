@@ -147,7 +147,8 @@ export default function FormatDashboard({
   initial: Format;
   state: StudioState;
   onClose: () => void;
-  onSave: (format: Format) => Promise<Format>;
+  // `expected` is the version an update was edited from.
+  onSave: (format: Format, expected?: number) => Promise<Format>;
   onOpenPost: (post: Post) => void;
   onCreate: (format: Format, topic?: string) => void;
   schedule: (posts: Post[]) => ReactNode;
@@ -327,7 +328,7 @@ export default function FormatDashboard({
     });
     if (!parsed.success) throw new Error(describeIssues(parsed.error.issues));
     const next = normalize(
-      await onSave({ ...parsed.data, id: draft.id }),
+      await onSave({ ...parsed.data, id: draft.id }, saved.version ?? 0),
       state,
     );
     setSaved(next);

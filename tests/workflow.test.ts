@@ -156,7 +156,7 @@ test("website reader rejects unsafe destinations and extracts readable HTML", as
 
   const source = await readWebsite("https://example.com/product", {
     lookup: publicLookup,
-    fetchImpl: async () =>
+    transport: async () =>
       new Response(
         "<html><head><title>Useful product</title><meta name='description' content='A clear description'></head><body><nav>Skip me</nav><main><h1>Make better work</h1><p>Useful product details.</p><script>ignore()</script></main></body></html>",
         { headers: { "content-type": "text/html; charset=utf-8" } },
@@ -178,7 +178,7 @@ test("website reader validates redirect targets, content types, and size", async
     () =>
       readWebsite("https://example.com", {
         lookup,
-        fetchImpl: async () =>
+        transport: async () =>
           new Response(null, {
             status: 302,
             headers: { location: "https://internal.example/private" },
@@ -190,7 +190,7 @@ test("website reader validates redirect targets, content types, and size", async
     () =>
       readWebsite("https://example.com/file", {
         lookup,
-        fetchImpl: async () =>
+        transport: async () =>
           new Response("{}", {
             headers: { "content-type": "application/json" },
           }),
@@ -201,7 +201,7 @@ test("website reader validates redirect targets, content types, and size", async
     () =>
       readWebsite("https://example.com/large", {
         lookup,
-        fetchImpl: async () =>
+        transport: async () =>
           new Response("<html></html>", {
             headers: {
               "content-type": "text/html",
@@ -338,7 +338,7 @@ test("export route returns a ZIP only for the approved revision", async () => {
     title: "Route export test",
   });
   const request = new NextRequest(
-    `http://localhost:3000/api/export/${post.id}`,
+    `http://localhost:3000/api/export/${post.id}?revision=${post.revision}`,
     { headers: { host: "localhost:3000" } },
   );
   const denied = await exportPackage(request, {

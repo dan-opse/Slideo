@@ -6,7 +6,7 @@ import {
   FONT_FILES,
   canvasHeight,
   imageRect,
-  layoutText,
+  textProblem,
   photoTextSvg,
 } from "./photo-layout";
 import type { PhotoText, PostContent, Slide } from "./schema";
@@ -102,15 +102,8 @@ export async function renderPhotoSlide(
   const texts = await Promise.all(
     (slide.textLayers ?? []).map(async (layer) => {
       const font = await photoFont(layer.font);
-      if (
-        layoutText(layer, font).overflow ||
-        layer.x + layer.width > 240.1 ||
-        layer.y + layer.height > height + 0.1
-      )
-        throw new StudioError(
-          `Slide ${index + 1}: text does not fit its box or canvas. Increase the box height, reduce the size, or shorten the copy.`,
-          422,
-        );
+      const problem = textProblem(layer, font, height);
+      if (problem) throw new StudioError(`Slide ${index + 1}: ${problem}`, 422);
       return photoTextSvg(layer, font);
     }),
   );

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guard } from "@/lib/guard";
 import { renderSlide } from "@/lib/render";
 import { StudioError } from "@/lib/store";
+import { logUnexpected } from "@/lib/log";
 export async function GET(
   req: NextRequest,
   {
@@ -10,8 +11,9 @@ export async function GET(
 ) {
   const denied = guard(req);
   if (denied) return denied;
+  let p: { post: string; revision: string; slide: string } | undefined;
   try {
-    const p = await params;
+    p = await params;
     const revision = Number(p.revision),
       slide = Number(p.slide);
     if (!Number.isInteger(revision) || !Number.isInteger(slide))
@@ -28,7 +30,11 @@ export async function GET(
     // contain server paths.
     if (e instanceof StudioError)
       return NextResponse.json({ error: e.message }, { status: e.status });
-    console.error("Render failed", e instanceof Error ? e.name : "Unknown");
+    logUnexpected("Render", e, {
+      post: p?.post,
+      revision: p?.revision,
+      slide: p?.slide,
+    });
     return NextResponse.json(
       { error: "This slide could not be rendered." },
       { status: 500 },

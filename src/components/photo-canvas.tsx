@@ -5,7 +5,7 @@ import {
   FONT_FILES,
   canvasHeight,
   imageRect,
-  layoutText,
+  textProblem,
   photoTextSvg,
 } from "@/lib/photo-layout";
 import type { Asset, PhotoText, Post, Slide } from "@/lib/schema";
@@ -175,7 +175,7 @@ export const PhotoCanvas = memo(function PhotoCanvas({
         (slide.textLayers ?? []).map((layer) => {
           const active = activeLayer === layer.id;
           const overflow =
-            fonts && layoutText(layer, fonts[layer.font]).overflow;
+            fonts && textProblem(layer, fonts[layer.font], height);
           return (
             <div
               key={layer.id}

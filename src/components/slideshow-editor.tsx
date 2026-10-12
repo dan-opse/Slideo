@@ -46,6 +46,7 @@ import {
   photoSlide,
   recolorStyle,
   restyle,
+  textProblem,
 } from "@/lib/photo-layout";
 import { PhotoCanvas, usePhotoFonts } from "./photo-canvas";
 import { NumberInput } from "./number-input";
@@ -248,12 +249,12 @@ export default function SlideshowEditor({
     })),
   ];
   const height = canvasHeight(post.aspect);
-  const overflow = !!(
+  const textIssue =
+    fonts && layer ? textProblem(layer, fonts[layer.font], height) : null;
+  const missingGlyphs = !!(
     fonts &&
     layer &&
-    (layoutText(layer, fonts[layer.font]).overflow ||
-      layer.y + layer.height > height + 0.1 ||
-      layer.x + layer.width > 240.1)
+    layoutText(layer, fonts[layer.font]).missing.length
   );
 
   function update(next: Post, key = "") {
@@ -482,7 +483,9 @@ export default function SlideshowEditor({
     setEditing(false);
   }
   async function download() {
-    const response = await fetch(`/api/export/${saved.id}`);
+    const response = await fetch(
+      `/api/export/${saved.id}?revision=${saved.revision}`,
+    );
     if (!response.ok) throw new Error((await response.json()).error);
     const url = URL.createObjectURL(await response.blob());
     const link = document.createElement("a");
@@ -1373,19 +1376,25 @@ export default function SlideshowEditor({
                           <Trash2 size={15} />
                         </Tool>
                       </div>
-                      {overflow && (
+                      {textIssue && (
                         <div className="photo-overflow" role="alert">
-                          Text exceeds its box.{" "}
-                          <button
-                            onClick={() =>
-                              fonts &&
-                              patchLayer(
-                                fitText(layer, fonts[layer.font], post.aspect),
-                              )
-                            }
-                          >
-                            Fit box to text
-                          </button>
+                          {textIssue}{" "}
+                          {!missingGlyphs && (
+                            <button
+                              onClick={() =>
+                                fonts &&
+                                patchLayer(
+                                  fitText(
+                                    layer,
+                                    fonts[layer.font],
+                                    post.aspect,
+                                  ),
+                                )
+                              }
+                            >
+                              Fit box to text
+                            </button>
+                          )}
                         </div>
                       )}
                     </>
@@ -1513,12 +1522,20 @@ export default function SlideshowEditor({
                           { value: "quad", label: "4 images · grid" },
                         ]}
                         onChange={(imageGrid) =>
+                          // A smaller grid drops the slots it no longer shows,
+                          // so hidden images never count as slide content.
                           patch({
                             imageGrid,
-                            additionalAssetIds:
-                              imageGrid === "none"
-                                ? []
-                                : (slide.additionalAssetIds ?? []),
+                            additionalAssetIds: (
+                              slide.additionalAssetIds ?? []
+                            ).slice(
+                              0,
+                              imageGrid === "quad"
+                                ? 3
+                                : imageGrid === "split"
+                                  ? 1
+                                  : 0,
+                            ),
                           })
                         }
                       />
@@ -1923,6 +1940,7 @@ export default function SlideshowEditor({
                     action(async () => {
                       const next = await request("publish", {
                         id: saved.id,
+                        revision: saved.revision,
                         url,
                         replace,
                       });

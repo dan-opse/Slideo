@@ -226,6 +226,7 @@ test("published posts cannot be archived; deleted posts can be restored", async 
   const short = await action({
     action: "publish",
     id: again.id,
+    revision: again.revision,
     url: "https://vm.tiktok.com/ZMabc123/",
   });
   assert.equal(short.status, 200, short.body.error);
@@ -234,12 +235,14 @@ test("published posts cannot be archived; deleted posts can be restored", async 
   const overwrite = await action({
     action: "publish",
     id: p.id,
+    revision: p.revision,
     url: "https://www.tiktok.com/@me/photo/2",
   });
   assert.equal(overwrite.status, 409);
   const corrected = await action({
     action: "publish",
     id: p.id,
+    revision: p.revision,
     url: "https://www.tiktok.com/@me/photo/2",
     replace: true,
   });
@@ -256,6 +259,7 @@ test("results keep earlier snapshots without breaking the approved export", asyn
   await action({
     action: "publish",
     id: p.id,
+    revision: p.revision,
     url: "https://www.tiktok.com/@me/photo/3",
   });
   const huge = await action({
@@ -277,14 +281,20 @@ test("results keep earlier snapshots without breaking the approved export", asyn
     [10, 20],
   );
   const zip = await exportRoute(
-    new NextRequest(`http://localhost:3000/api/export/${p.id}`, { headers }),
+    new NextRequest(
+      `http://localhost:3000/api/export/${p.id}?revision=${p.revision}`,
+      { headers },
+    ),
     { params: Promise.resolve({ id: p.id }) },
   );
   assert.equal(zip.status, 200);
   const empty = await exportRoute(
-    new NextRequest(`http://localhost:3000/api/export/${p.id}?slide=`, {
-      headers,
-    }),
+    new NextRequest(
+      `http://localhost:3000/api/export/${p.id}?revision=${p.revision}&slide=`,
+      {
+        headers,
+      },
+    ),
     { params: Promise.resolve({ id: p.id }) },
   );
   assert.equal(empty.status, 404);
