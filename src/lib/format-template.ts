@@ -79,8 +79,11 @@ export function templateSlide(
 ): Slide {
   const template = templateFor(format, slide.role);
   const collection = collectionOverride || template.collection;
+  // Removed images stay on disk for old revisions but are never reused.
   const available = collection
-    ? assets.filter((asset) => asset.collection === collection)
+    ? assets.filter(
+        (asset) => asset.collection === collection && !asset.removedAt,
+      )
     : [];
   const count =
     template.imageGrid === "quad" ? 4 : template.imageGrid === "split" ? 2 : 1;
@@ -108,12 +111,17 @@ export function templateSlide(
     fonts[template.font],
     format.aspect,
   );
-  if (template.position === "top") text.y = 28;
+  if (template.position === "top")
+    text.y = Math.max(
+      0,
+      Math.min(28, canvasHeight(format.aspect) - text.height),
+    );
   if (template.position === "bottom")
     text.y = Math.max(0, canvasHeight(format.aspect) - text.height - 28);
   return {
     ...photoSlide(slide, format.aspect, fonts[template.font]),
     background: format.color,
+    ink: format.ink,
     assetId: ids[0] ?? null,
     additionalAssetIds: ids.slice(1),
     imageGrid: template.imageGrid,
@@ -130,6 +138,17 @@ export function slideAssetIds(slide: Slide) {
   return [slide.assetId, ...(slide.additionalAssetIds ?? [])].filter(
     (id): id is string => !!id,
   );
+}
+
+// Images a render actually draws: photo slides show only the slots their grid
+// selects, editorial slides only their background. Hidden leftovers from a
+// larger grid are kept in the revision but are not slide content.
+export function visibleAssetIds(slide: Slide) {
+  return slide.design === "photo"
+    ? imageSlots(slide, 1).map((slot) => slot.id)
+    : slide.assetId
+      ? [slide.assetId]
+      : [];
 }
 
 export function imageSlots(slide: Slide, height: number) {

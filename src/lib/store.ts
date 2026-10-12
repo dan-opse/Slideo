@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { slideAssetIds } from "./format-template";
+import { visibleAssetIds } from "./format-template";
 import type {
   Asset,
   Brand,
@@ -65,6 +65,23 @@ export function put<T extends { id: string }>(kind: string, item: T) {
       "INSERT INTO entities VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET json=excluded.json",
     )
     .run(kind, item.id, JSON.stringify(item));
+}
+const changed: Record<string, string> = {
+  brand: "This brand brief changed in another window. Reload before saving.",
+  format: "This format changed in another window. Reload before saving.",
+};
+// Brands and formats are saved whole. An update names the version it was
+// edited from; anything else would silently erase another window's changes.
+// Call inside a transaction so the check and the write are atomic.
+export function nextVersion(
+  kind: "brand" | "format",
+  id: string | undefined,
+  expected: number | undefined,
+) {
+  if (!id) return 1;
+  const current = get<{ version?: number }>(kind, id).version ?? 0;
+  if (expected !== current) throw new StudioError(changed[kind], 409);
+  return current + 1;
 }
 export function remove(kind: string, id: string) {
   database()
@@ -191,7 +208,7 @@ export function approvePost(id: string, revision: number, hashes: string[]) {
     if (hashes.length !== post.slides.length)
       throw new StudioError("Render every slide before approval.");
     post.slides.forEach((slide, index) => {
-      const images = slideAssetIds(slide);
+      const images = visibleAssetIds(slide);
       // Photo slides may be image-only; editorial slides are built around a heading.
       const empty =
         slide.design === "photo"
@@ -310,7 +327,11 @@ export function migrateFormatSlideCounts() {
   existingFormats
     .filter((format) => format.slideCount > 10)
     .forEach((format) => {
-      put("format", { ...format, slideCount: 10 });
+      put("format", {
+        ...format,
+        slideCount: 10,
+        version: (format.version ?? 0) + 1,
+      });
       audit("format.slide_count_capped", format.id);
     });
   return existingFormats;

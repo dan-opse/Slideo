@@ -7,7 +7,8 @@ export const FONT_FILES = {
   regular: "TikTokSans16pt-Regular.ttf",
 } as const;
 // Bump when photo pixels change so disk and browser caches use the same renderer.
-export const PHOTO_RENDER_VERSION = 3;
+// v4: invisible format characters are no longer drawn as missing glyphs.
+export const PHOTO_RENDER_VERSION = 4;
 export const canvasHeight = (aspect: PostContent["aspect"]) =>
   aspect === "story" ? 1920 / 4.5 : 300;
 export const clamp = (v: number, min: number, max: number) =>
@@ -71,14 +72,29 @@ function serializeGlyphPath(commands: PathCommand[]) {
     .join(" ");
 }
 
+// Format characters (zero-width joiners and spaces, soft hyphens), emoji
+// variation selectors and non-whitespace control characters have no shape.
+// Drawing them would show the font's missing-glyph box, so layout drops them.
+const INVISIBLE = /[\p{Cf}︀-️]|(?!\s)\p{Cc}/gu;
+
 // A single layout implementation generates glyph paths for browser and JPEG.
 // No system font substitution or browser-specific text wrapping on export.
 export function layoutText(layer: PhotoText, font: Font) {
   const available = layer.width - 4;
   const measure = (value: string) =>
     font.getAdvanceWidth(value, layer.size, { kerning: true });
+  const text = layer.text.replace(INVISIBLE, "");
+  // Characters the bundled font cannot draw; never substituted silently.
+  const missing = [
+    ...new Set(
+      [...text].filter(
+        (character) =>
+          !/\s/.test(character) && font.charToGlyphIndex(character) === 0,
+      ),
+    ),
+  ];
   const lines: string[] = [];
-  for (const paragraph of layer.text.split("\n")) {
+  for (const paragraph of text.split("\n")) {
     let line = "";
     for (const word of paragraph.trim().split(/\s+/).filter(Boolean)) {
       const next = line ? `${line} ${word}` : word;
@@ -115,22 +131,109 @@ export function layoutText(layer: PhotoText, font: Font) {
     const top = layer.y + 1 + index * lineHeight;
     return { line, x, width, top, bottom: top + lineHeight };
   });
-  const path = rows
-    .map(({ line, x, top }) =>
-      serializeGlyphPath(
-        font.getPath(line, x, top + layer.size * 0.84, layer.size, {
-          kerning: true,
-        }).commands,
-      ),
-    )
+  const paths = rows.map(({ line, x, top }) =>
+    font.getPath(line, x, top + layer.size * 0.84, layer.size, {
+      kerning: true,
+    }),
+  );
+  const path = paths
+    .map((glyphs) => serializeGlyphPath(glyphs.commands))
     .join(" ");
+  // Drawn glyph extent, which accents and side bearings can push past the
+  // nominal line box.
+  const boxes = paths
+    .filter((glyphs) => glyphs.commands.length)
+    .map((glyphs) => glyphs.getBoundingBox());
+  const ink = boxes.length
+    ? {
+        left: Math.min(...boxes.map((box) => box.x1)),
+        top: Math.min(...boxes.map((box) => box.y1)),
+        right: Math.max(...boxes.map((box) => box.x2)),
+        bottom: Math.max(...boxes.map((box) => box.y2)),
+      }
+    : null;
+  // A single character can be wider than the box; splitting cannot fix it.
+  const tooWide = rows.some((row) => row.width > available + 0.01);
   return {
     path,
     lines,
     rows,
+    ink,
+    missing,
     requiredHeight,
-    overflow: requiredHeight > layer.height + 1,
+    tooWide,
+    overflow: requiredHeight > layer.height + 1 || tooWide,
   };
+}
+
+// How far a background blob extends around each line of text.
+const backgroundPadding = (layer: PhotoText) => ({
+  padX: layer.size * 0.34,
+  padY: layer.size * 0.16,
+});
+
+// Outline and shadow strokes extend the drawn glyphs beyond their outlines;
+// a background blob extends past every non-blank line by its padding.
+function effectBounds(
+  layer: PhotoText,
+  { ink, rows }: ReturnType<typeof layoutText>,
+) {
+  if (!ink) return null;
+  if (layer.style === "box") {
+    const { padX, padY } = backgroundPadding(layer);
+    const lines = rows.filter((row) => row.width > 0);
+    return {
+      left: Math.min(ink.left, ...lines.map((row) => row.x - padX)),
+      top: Math.min(ink.top, ...lines.map((row) => row.top - padY)),
+      right: Math.max(
+        ink.right,
+        ...lines.map((row) => row.x + row.width + padX),
+      ),
+      bottom: Math.max(ink.bottom, ...lines.map((row) => row.bottom + padY)),
+    };
+  }
+  if (layer.style === "outline") {
+    const half = (layer.size * 0.13) / 2;
+    return {
+      left: ink.left - half,
+      top: ink.top - half,
+      right: ink.right + half,
+      bottom: ink.bottom + half,
+    };
+  }
+  if (layer.style === "shadow")
+    return { ...ink, right: ink.right + 1.1, bottom: ink.bottom + 1.3 };
+  return ink;
+}
+
+const quoted = (characters: string[]) =>
+  characters
+    .slice(0, 5)
+    .map((character) => `“${character}”`)
+    .join(", ") + (characters.length > 5 ? " and others" : "");
+
+// Why a text layer cannot be rendered exactly, or null when it can. Preview,
+// editor warnings and export all use this one check.
+export function textProblem(layer: PhotoText, font: Font, height: number) {
+  const layout = layoutText(layer, font);
+  if (layout.missing.length)
+    return `The font can’t draw ${quoted(layout.missing)}. Remove or replace ${layout.missing.length === 1 ? "it" : "them"}.`;
+  if (
+    layout.overflow ||
+    layer.x + layer.width > 240.1 ||
+    layer.y + layer.height > height + 0.1
+  )
+    return "Text does not fit its box or canvas. Increase the box size, reduce the text size, or shorten the copy.";
+  const drawn = effectBounds(layer, layout);
+  if (
+    drawn &&
+    (drawn.left < -0.1 ||
+      drawn.top < -0.1 ||
+      drawn.right > 240.1 ||
+      drawn.bottom > height + 0.1)
+  )
+    return "Text is drawn past the edge of the slide. Move the box inward or reduce the text size.";
+  return null;
 }
 
 export const DEFAULT_ROUNDNESS = 60;
@@ -141,8 +244,7 @@ const round2 = (value: number) => Number(value.toFixed(2));
 // Blank lines split the text into separate blobs.
 export function backgroundPath(layer: PhotoText, font: Font) {
   const { rows } = layoutText(layer, font);
-  const padX = layer.size * 0.34,
-    padY = layer.size * 0.16,
+  const { padX, padY } = backgroundPadding(layer),
     lineHeight = layer.size * 1.12;
   const radius =
     ((layer.roundness ?? DEFAULT_ROUNDNESS) / 100) * (lineHeight / 2 + padY);
@@ -281,11 +383,22 @@ export function fitText(
   font: Font,
   aspect: PostContent["aspect"],
 ): PhotoText {
-  const height = Math.max(34, layoutText(layer, font).requiredHeight);
+  const canvas = canvasHeight(aspect);
+  const width = clamp(layer.width, 20, 240);
+  let next: PhotoText = { ...layer, width, x: clamp(layer.x, 0, 240 - width) };
+  // Copy too tall for the canvas, or a character wider than the box, shrinks
+  // one point at a time. Text that still overflows at the minimum size keeps
+  // a canvas-sized box, so rendering reports it instead of saving bad geometry.
+  let layout = layoutText(next, font);
+  while ((layout.requiredHeight > canvas || layout.tooWide) && next.size > 6) {
+    next = { ...next, size: Math.max(6, Math.ceil(next.size) - 1) };
+    layout = layoutText(next, font);
+  }
+  const height = clamp(Math.max(34, layout.requiredHeight), 12, canvas);
   return {
-    ...layer,
+    ...next,
     height,
-    y: Math.ceil((canvasHeight(aspect) - height) / 2),
+    y: clamp(Math.ceil((canvas - height) / 2), 0, canvas - height),
   };
 }
 

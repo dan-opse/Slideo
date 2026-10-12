@@ -74,7 +74,11 @@ after(() => {
 });
 
 test("format settings persist without altering existing posts or revisions", async () => {
-  const response = await request({ action: "format", data: format });
+  const response = await request({
+    action: "format",
+    data: format,
+    expected: 0,
+  });
   assert.equal(response.status, 200);
   assert.deepEqual((await response.json()).templates, format.templates);
   assert.deepEqual(store.get<Post>("post", original.id), original);
@@ -155,7 +159,11 @@ test("manual creation snapshots role templates and preserves popup count and sel
   );
   store.put("asset", noRights);
   const approved = store.approvePost(post.id, post.revision, hashes);
-  await request({ action: "format", data: { ...format, slideCount: 3 } });
+  await request({
+    action: "format",
+    data: { ...format, slideCount: 3 },
+    expected: store.get<Format>("format", format.id).version,
+  });
   assert.deepEqual(store.assertApproval(approved), hashes);
   assert.equal(store.get<Post>("post", post.id).slides.length, 8);
   const slots = imageSlots(
@@ -444,7 +452,11 @@ test("a saved slide structure sets the order, styles, text and count of new draf
     ],
   };
   store.put("format", structured);
-  const saved = await request({ action: "format", data: structured });
+  const saved = await request({
+    action: "format",
+    data: structured,
+    expected: 0,
+  });
   assert.equal(saved.status, 200);
   assert.equal((await saved.json()).slideCount, 4, "count follows structure");
   const response = await request({

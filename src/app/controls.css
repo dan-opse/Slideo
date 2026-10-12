@@ -586,11 +586,7 @@ input.color-picker-hex {
   --dropdown-h: 39px;
   --dropdown-font: 12px;
 }
-.inspector .field .dropdown,
-.inspector .field .color-field {
-  --dropdown-h: 34px;
-  --dropdown-font: 11px;
-}
+
 .fd-field .dropdown,
 .fd-field .color-field {
   --dropdown-h: 38px;

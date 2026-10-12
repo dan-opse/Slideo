@@ -41,7 +41,11 @@ export const brandSchema = z.object({
       "Website must be a full web address starting with https://",
     ),
 });
-export type Brand = z.infer<typeof brandSchema> & { id: string };
+// `version` counts saved updates so a stale window cannot overwrite newer ones.
+export type Brand = z.infer<typeof brandSchema> & {
+  id: string;
+  version?: number;
+};
 export const roleTemplateSchema = z.object({
   collection: z.string().max(80),
   imageGrid: z.enum(["none", "split", "quad"]),
@@ -99,7 +103,10 @@ export const formatSchema = z.object({
     })
     .optional(),
 });
-export type Format = z.infer<typeof formatSchema> & { id: string };
+export type Format = z.infer<typeof formatSchema> & {
+  id: string;
+  version?: number;
+};
 export const slideSchema = z.object({
   id: z.string(),
   role: z.enum(["hook", "body", "cta"]),

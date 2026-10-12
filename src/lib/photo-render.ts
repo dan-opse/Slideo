@@ -6,7 +6,7 @@ import {
   FONT_FILES,
   canvasHeight,
   imageRect,
-  layoutText,
+  textProblem,
   photoTextSvg,
 } from "./photo-layout";
 import type { PhotoText, PostContent, Slide } from "./schema";
@@ -88,11 +88,26 @@ async function slotImage(
   return `<image href="data:image/jpeg;base64,${pixels.toString("base64")}" x="${slot.x + left}" y="${slot.y + top}" width="${right - left}" height="${bottom - top}" preserveAspectRatio="none"/>`;
 }
 
+// Every photo render, including one already cached on disk, must pass the
+// current text checks; an older renderer may have drawn what these reject.
+export async function assertPhotoRenderable(
+  slide: Slide,
+  aspect: PostContent["aspect"],
+  index: number,
+) {
+  const height = canvasHeight(aspect);
+  for (const layer of slide.textLayers ?? []) {
+    const problem = textProblem(layer, await photoFont(layer.font), height);
+    if (problem) throw new StudioError(`Slide ${index + 1}: ${problem}`, 422);
+  }
+}
+
 export async function renderPhotoSlide(
   slide: Slide,
   aspect: PostContent["aspect"],
   index: number,
 ) {
+  await assertPhotoRenderable(slide, aspect, index);
   const height = canvasHeight(aspect);
   let background = `<rect width="240" height="${height}" fill="${slide.background}"/>`;
   const slots = imageSlots(slide, height);
@@ -100,19 +115,9 @@ export async function renderPhotoSlide(
   if (slots.length)
     background += `<rect width="240" height="${height}" fill="#000" opacity="${slide.overlay}"/>`;
   const texts = await Promise.all(
-    (slide.textLayers ?? []).map(async (layer) => {
-      const font = await photoFont(layer.font);
-      if (
-        layoutText(layer, font).overflow ||
-        layer.x + layer.width > 240.1 ||
-        layer.y + layer.height > height + 0.1
-      )
-        throw new StudioError(
-          `Slide ${index + 1}: text does not fit its box or canvas. Increase the box height, reduce the size, or shorten the copy.`,
-          422,
-        );
-      return photoTextSvg(layer, font);
-    }),
+    (slide.textLayers ?? []).map(async (layer) =>
+      photoTextSvg(layer, await photoFont(layer.font)),
+    ),
   );
   return sharp(
     Buffer.from(

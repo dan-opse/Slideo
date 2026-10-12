@@ -26,6 +26,7 @@ import {
   digest,
   get,
   list,
+  nextVersion,
   now,
   put,
   remove,
@@ -45,13 +46,13 @@ import {
 } from "@/lib/ai";
 import { readWebsite } from "@/lib/website";
 import { photoFont } from "@/lib/photo-render";
-import { photoSlide } from "@/lib/photo-layout";
 import {
   slideAssetIds,
   slideStructure,
   templateSlide,
 } from "@/lib/format-template";
 import { describeIssues } from "@/lib/errors";
+import { logUnexpected } from "@/lib/log";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -239,31 +240,50 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const denied = guard(req);
   if (denied) return denied;
+  let action = "upload",
+    target: string | undefined;
   try {
     if (req.headers.get("content-type")?.includes("multipart/form-data"))
       return NextResponse.json(await upload(req));
     const input = await readJson(req);
-    const action = z.string({ error: "Choose an action." }).parse(input.action);
+    action = z.string({ error: "Choose an action." }).parse(input.action);
+    if (typeof input.id === "string") target = input.id;
     if (!ACTIONS.has(action)) throw new StudioError("Unknown action.");
-    if (action === "brand") {
-      const data = brandSchema.parse(input.data);
-      // An id means "update this brief"; it must already exist.
-      if (data.id) get<Brand>("brand", data.id);
-      const item = { ...data, id: data.id || uid() };
-      put("brand", item);
-      return NextResponse.json(item);
-    }
-    if (action === "format") {
+    if (action === "brand" || action === "format") {
+      // An id means "update this record"; it must exist at `expected`.
+      const expected =
+        input.expected === undefined
+          ? undefined
+          : z.number().int().parse(input.expected);
+      if (action === "brand") {
+        const data = brandSchema.parse(input.data);
+        return NextResponse.json(
+          transaction(() => {
+            const item: Brand = {
+              ...data,
+              id: data.id || uid(),
+              version: nextVersion("brand", data.id, expected),
+            };
+            put("brand", item);
+            return item;
+          }),
+        );
+      }
       const data = formatSchema.parse(input.data);
-      if (data.id) get<Format>("format", data.id);
-      if (data.brandId) get<Brand>("brand", data.brandId);
-      const item = {
-        ...data,
-        slideCount: data.structure?.length ?? data.slideCount,
-        id: data.id || uid(),
-      };
-      put("format", item);
-      return NextResponse.json(item);
+      return NextResponse.json(
+        transaction(() => {
+          const version = nextVersion("format", data.id, expected);
+          if (data.brandId) get<Brand>("brand", data.brandId);
+          const item: Format = {
+            ...data,
+            slideCount: data.structure?.length ?? data.slideCount,
+            id: data.id || uid(),
+            version,
+          };
+          put("format", item);
+          return item;
+        }),
+      );
     }
     if (action === "asset") {
       const id = z.string().parse(input.id);
@@ -435,20 +455,28 @@ export async function POST(req: NextRequest) {
           photoFont("semibold"),
           photoFont("regular"),
         ]);
+        // Formats without role templates use the template fallback, which
+        // honors their saved colors, exactly as the format preview does.
         postContent.slides = postContent.slides.map((slide, index) =>
-          format.templates
-            ? templateSlide(
-                slide,
-                format,
-                { default: font, semibold, regular },
-                library,
-                index,
-                args.collection,
-              )
-            : photoSlide(slide, format.aspect, font),
+          templateSlide(
+            slide,
+            format,
+            { default: font, semibold, regular },
+            library,
+            index,
+            args.collection,
+          ),
         ) as typeof postContent.slides;
       }
-      const post = savePost(postContent);
+      // Layout derives geometry from the copy; never persist a post that
+      // ordinary saves and rendering would then reject.
+      const checked = postSchema.safeParse(postContent);
+      if (!checked.success)
+        throw new StudioError(
+          `This format produced a slide that doesn't fit: ${describeIssues(checked.error.issues)} Adjust the format's text settings and try again.`,
+          422,
+        );
+      const post = savePost(checked.data);
       return NextResponse.json(post);
     }
     const id = z.string().parse(input.id);
@@ -484,9 +512,20 @@ export async function POST(req: NextRequest) {
           "Enter the HTTPS link of your published TikTok post (tiktok.com or vm.tiktok.com).",
         );
       const replace = input.replace === true;
+      const revision = z
+        .number({ error: "Reload the studio, then record the link again." })
+        .int()
+        .parse(input.revision);
       return NextResponse.json(
         transaction(() => {
           const current = get<Post>("post", id);
+          // Only the revision the owner reviewed and exported may be marked
+          // published; a newer approval from another window must not be.
+          if (current.revision !== revision)
+            throw new StudioError(
+              "This slideshow changed in another window. Reload to review the current version before recording its link.",
+              409,
+            );
           assertApproval(current);
           // Changing a recorded link must be deliberate, never a silent overwrite.
           if (current.status === "published" && !replace)
@@ -535,10 +574,7 @@ export async function POST(req: NextRequest) {
         { error: describeIssues(e.issues) },
         { status: 400 },
       );
-    console.error(
-      "Studio operation failed",
-      e instanceof Error ? e.name : "Unknown error",
-    );
+    logUnexpected("Studio operation", e, { action, id: target });
     return NextResponse.json(
       {
         error:

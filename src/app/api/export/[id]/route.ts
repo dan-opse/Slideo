@@ -4,15 +4,27 @@ import { guard } from "@/lib/guard";
 import { assertApproval, audit, get, StudioError } from "@/lib/store";
 import { renderAll } from "@/lib/render";
 import type { Post } from "@/lib/schema";
+import { logUnexpected } from "@/lib/log";
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const denied = guard(req);
   if (denied) return denied;
+  let id: string | undefined;
   try {
-    const { id } = await params;
+    ({ id } = await params);
     const post = get<Post>("post", id);
+    // The client names the revision it displayed; a newer approval made in
+    // another window must never be exported in its place.
+    const expected = req.nextUrl.searchParams.get("revision");
+    if (!expected || !/^\d+$/.test(expected))
+      throw new StudioError("Reload the studio, then download again.", 400);
+    if (Number(expected) !== post.revision)
+      throw new StudioError(
+        "This slideshow changed in another window. Reload to review the current version before downloading.",
+        409,
+      );
     const approved = assertApproval(post);
     const { buffers, hashes } = await renderAll(id, post.revision);
     if (JSON.stringify(hashes) !== JSON.stringify(approved))
@@ -77,7 +89,10 @@ export async function GET(
   } catch (e) {
     if (e instanceof StudioError)
       return NextResponse.json({ error: e.message }, { status: e.status });
-    console.error("Export failed", e instanceof Error ? e.name : "Unknown");
+    logUnexpected("Export", e, {
+      post: id,
+      revision: req.nextUrl.searchParams.get("revision") ?? undefined,
+    });
     return NextResponse.json(
       { error: "The export could not be created. Try again." },
       { status: 500 },

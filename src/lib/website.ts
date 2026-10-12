@@ -1,5 +1,7 @@
-import { BlockList, isIP } from "node:net";
+import { BlockList, isIP, type LookupFunction } from "node:net";
 import { lookup as dnsLookup } from "node:dns/promises";
+import { request as httpsRequest } from "node:https";
+import { Readable } from "node:stream";
 import { load } from "cheerio";
 import { StudioError } from "./store";
 
@@ -51,10 +53,8 @@ function isBlockedAddress(address: string) {
   return family === 0 || blocked.check(address, family === 4 ? "ipv4" : "ipv6");
 }
 
-export async function assertPublicWebsiteUrl(
-  value: string,
-  lookup: Lookup = defaultLookup,
-) {
+// Resolves once and returns the public addresses the connection must use.
+async function resolvePublicWebsite(value: string, lookup: Lookup) {
   let url: URL;
   try {
     url = new URL(value);
@@ -88,8 +88,85 @@ export async function assertPublicWebsiteUrl(
     addresses.some((item) => isBlockedAddress(item.address))
   )
     throw new StudioError("That website resolves to a non-public address.");
-  return url;
+  return { url, addresses };
 }
+
+export async function assertPublicWebsiteUrl(
+  value: string,
+  lookup: Lookup = defaultLookup,
+) {
+  return (await resolvePublicWebsite(value, lookup)).url;
+}
+
+// Answers the socket's hostname lookup with the already validated addresses
+// only, so a DNS answer that changes after validation is never used.
+export function pinnedLookup(addresses: LookupAddress[]): LookupFunction {
+  return (_hostname, options, callback) => {
+    const family =
+      options.family === 4 || options.family === "IPv4"
+        ? 4
+        : options.family === 6 || options.family === "IPv6"
+          ? 6
+          : 0;
+    const usable = addresses.filter(
+      (item) => !family || item.family === family,
+    );
+    if (!usable.length)
+      return callback(
+        Object.assign(new Error("No validated address for this host."), {
+          code: "ENOTFOUND",
+        }),
+        "",
+      );
+    if (options.all) return callback(null, usable);
+    callback(null, usable[0].address, usable[0].family);
+  };
+}
+
+// Requests one URL over a connection bound to `addresses`. TLS still checks
+// the certificate against the hostname, which is also sent as the Host header.
+export type WebsiteTransport = (
+  url: URL,
+  addresses: LookupAddress[],
+  signal: AbortSignal,
+) => Promise<Response>;
+export const pinnedTransport: WebsiteTransport = (url, addresses, signal) =>
+  new Promise((resolve, reject) => {
+    const request = httpsRequest(
+      url,
+      {
+        headers: {
+          accept: "text/html,application/xhtml+xml",
+          "user-agent": "SlideoWebsiteReader/1.0",
+        },
+        lookup: pinnedLookup(addresses),
+        servername: url.hostname,
+        // No pooled sockets: every request connects through its own lookup.
+        agent: false,
+        signal,
+      },
+      (response) => {
+        const status = response.statusCode ?? 0;
+        if (status < 200 || status > 599) {
+          response.destroy();
+          return reject(new Error(`Unexpected HTTP status ${status}.`));
+        }
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(response.headers))
+          for (const item of [value ?? []].flat()) headers.append(name, item);
+        const empty = [204, 205, 304].includes(status);
+        if (empty) response.resume();
+        resolve(
+          new Response(
+            empty ? null : (Readable.toWeb(response) as ReadableStream),
+            { status, headers },
+          ),
+        );
+      },
+    );
+    request.on("error", reject);
+    request.end();
+  });
 
 async function readLimitedBody(response: Response) {
   const declared = Number(response.headers.get("content-length") || 0);
@@ -127,24 +204,18 @@ export type WebsiteSource = {
 
 export async function readWebsite(
   value: string,
-  options: { fetchImpl?: typeof fetch; lookup?: Lookup } = {},
+  options: { transport?: WebsiteTransport; lookup?: Lookup } = {},
 ): Promise<WebsiteSource> {
-  const fetchImpl = options.fetchImpl || fetch;
+  const transport = options.transport || pinnedTransport;
   const lookup = options.lookup || defaultLookup;
-  let current = await assertPublicWebsiteUrl(value, lookup);
+  // Every hop, redirects included, connects only to addresses it validated.
+  let { url: current, addresses } = await resolvePublicWebsite(value, lookup);
   const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
 
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
     let response: Response;
     try {
-      response = await fetchImpl(current, {
-        redirect: "manual",
-        headers: {
-          accept: "text/html,application/xhtml+xml",
-          "user-agent": "SlideoWebsiteReader/1.0",
-        },
-        signal,
-      });
+      response = await transport(current, addresses, signal);
     } catch (error) {
       if (error instanceof StudioError) throw error;
       throw new StudioError(
@@ -154,22 +225,25 @@ export async function readWebsite(
     }
 
     if ([301, 302, 303, 307, 308].includes(response.status)) {
+      await response.body?.cancel().catch(() => {});
       const location = response.headers.get("location");
       if (!location)
         throw new StudioError("The website returned an invalid redirect.", 422);
       if (redirects === MAX_REDIRECTS)
         throw new StudioError("The website redirected too many times.", 422);
-      current = await assertPublicWebsiteUrl(
+      ({ url: current, addresses } = await resolvePublicWebsite(
         new URL(location, current).href,
         lookup,
-      );
+      ));
       continue;
     }
-    if (!response.ok)
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
       throw new StudioError(
         `The website returned HTTP ${response.status}.`,
         422,
       );
+    }
 
     const contentType =
       response.headers.get("content-type")?.toLowerCase() || "";

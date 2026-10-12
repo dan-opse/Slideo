@@ -56,6 +56,8 @@ import { describeIssues } from "@/lib/errors";
 import { PhotoCanvas, usePhotoFonts } from "./photo-canvas";
 import { NumberInput } from "./number-input";
 import { arrowStep } from "./keys";
+import { trapTab, useLatest, useScrollLock } from "./dialog";
+import { studioAction } from "./request";
 import { RenderFallback } from "./render-fallback";
 import { ColorPicker } from "./ui/color-picker";
 import { Dropdown } from "./ui/dropdown";
@@ -147,7 +149,8 @@ export default function FormatDashboard({
   initial: Format;
   state: StudioState;
   onClose: () => void;
-  onSave: (format: Format) => Promise<Format>;
+  // `expected` is the version an update was edited from.
+  onSave: (format: Format, expected?: number) => Promise<Format>;
   onOpenPost: (post: Post) => void;
   onCreate: (format: Format, topic?: string) => void;
   schedule: (posts: Post[]) => ReactNode;
@@ -190,10 +193,7 @@ export default function FormatDashboard({
     if (dirty) setConfirmClose(true);
     else onClose();
   }, [busy, dirty, onClose]);
-  const closeRef = useRef(requestClose);
-  useEffect(() => {
-    closeRef.current = requestClose;
-  }, [requestClose]);
+  const closeRef = useLatest(requestClose);
   // Arrow keys move between preview slides on the Slideshow Format page.
   const stepRef = useRef<(offset: number) => boolean>(() => false);
   useEffect(() => {
@@ -203,10 +203,9 @@ export default function FormatDashboard({
       return true;
     };
   });
+  useScrollLock(!suspended);
   useEffect(() => {
     if (suspended) return;
-    const old = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     root.current?.focus();
     const key = (event: KeyboardEvent) => {
       const confirmation =
@@ -224,29 +223,14 @@ export default function FormatDashboard({
       const step = arrowStep(event);
       if (step && !confirmation && stepRef.current(step))
         event.preventDefault();
-      if (event.key === "Tab") {
-        const controls = [
-          ...((confirmation ?? root.current)?.querySelectorAll<HTMLElement>(
-            "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary",
-          ) ?? []),
-        ].filter((el) => el.getClientRects().length);
-        const first = controls[0],
-          last = controls.at(-1);
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last?.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first?.focus();
-        }
-      }
+      // The close confirmation, when shown, holds focus by itself.
+      trapTab(event, confirmation ?? root.current);
     };
     document.addEventListener("keydown", key);
     return () => {
-      document.body.style.overflow = old;
       document.removeEventListener("keydown", key);
     };
-  }, [suspended]);
+  }, [suspended, closeRef]);
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => {
@@ -327,7 +311,7 @@ export default function FormatDashboard({
     });
     if (!parsed.success) throw new Error(describeIssues(parsed.error.issues));
     const next = normalize(
-      await onSave({ ...parsed.data, id: draft.id }),
+      await onSave({ ...parsed.data, id: draft.id }, saved.version ?? 0),
       state,
     );
     setSaved(next);
@@ -351,20 +335,16 @@ export default function FormatDashboard({
   }
   async function generateHooks() {
     await action(async () => {
-      const response = await fetch("/api/studio", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "hooks",
+      const result = await studioAction(
+        "hooks",
+        {
           brandId: draft.brandId,
           format: { ...draft, id: draft.id || undefined },
           prompt,
           url: draft.websiteUrl,
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok)
-        throw new Error(result.error || "Could not generate hooks.");
+        },
+        "Could not generate hooks.",
+      );
       setHooks([...(draft.hooks ?? []), ...result.hooks].join("\n"));
       setNotice("10 hooks added. Review them, then save your format.");
     });
