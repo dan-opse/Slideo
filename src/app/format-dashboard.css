@@ -654,9 +654,12 @@
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 16px 22px 25px;
+  padding: 16px 22px 12px;
   overflow-x: auto;
   flex-shrink: 0;
+}
+.fd-template-rail {
+  margin: 0 22px 10px;
 }
 .fd-template-slides > button {
   background: transparent;

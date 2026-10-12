@@ -59,6 +59,7 @@ import { arrowStep } from "./keys";
 import { RenderFallback } from "./render-fallback";
 import { Dropdown } from "./ui/dropdown";
 import { Slider } from "./ui/slider";
+import { ScrollRail } from "./ui/scroll-rail";
 import {
   canvasItems,
   fontItems,
@@ -1128,7 +1129,7 @@ export default function FormatDashboard({
                   </header>
                   <div
                     ref={previewTrack}
-                    className={`fd-template-slides ${grid ? "grid" : ""}`}
+                    className={`fd-template-slides scroll-rail-target ${grid ? "grid" : ""}`}
                   >
                     {previewSlides.map((slide, index) => (
                       <button
@@ -1166,6 +1167,10 @@ export default function FormatDashboard({
                       </button>
                     )}
                   </div>
+                  <ScrollRail
+                    target={previewTrack}
+                    className="fd-template-rail"
+                  />
                   <section
                     className="fd-slide-panel"
                     aria-label={`Slide ${current + 1}`}
