@@ -1,14 +1,15 @@
 :root {
-  --bg: #f8f9f5;
+  --bg: #fafafa;
   --surface: #fff;
-  --ink: #27372f;
-  --muted: #656d65;
-  --line: #e6e9e0;
-  --green: #315c40;
-  --lime: #d7e4bb;
+  --ink: #0a0a0a;
+  --muted: #666;
+  --line: #ebebeb;
+  --accent: #0a0a0a;
+  --tint: #f2f2f2;
   --serif: Georgia, "Times New Roman", serif;
-  --sans: "DM Sans", sans-serif;
-  --display: "Manrope", sans-serif;
+  --sans: "Geist Sans", system-ui, sans-serif;
+  --display: "Geist Sans", system-ui, sans-serif;
+  --mono: "Geist Mono", ui-monospace, monospace;
 }
 * {
   box-sizing: border-box;
@@ -49,7 +50,7 @@ a:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  outline: 3px solid #98b17e;
+  outline: 2px solid var(--ink);
   outline-offset: 3px;
 }
 a {
@@ -76,7 +77,7 @@ textarea,
 select {
   width: 100%;
   background: #fff;
-  border: 1px solid #dce1d5;
+  border: 1px solid #dfdfdf;
   border-radius: 7px;
   padding: 11px 12px;
   color: var(--ink);
@@ -89,7 +90,7 @@ textarea {
 input:focus,
 textarea:focus,
 select:focus {
-  border-color: #6f9063;
+  border-color: var(--ink);
 }
 small {
   font-size: 12px;
@@ -104,7 +105,7 @@ fieldset {
   min-width: 0;
 }
 code {
-  background: #edf0e7;
+  background: #efefef;
   padding: 2px 5px;
   border-radius: 3px;
   font-size: 12px;
@@ -126,45 +127,35 @@ code {
 }
 .wordmark {
   font-family: var(--display);
-  font-size: 27px;
-  font-weight: 800;
-  letter-spacing: -1.5px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding-left: 8px;
 }
 .brand-icon {
-  width: 34px;
-  height: 34px;
-  background: var(--green);
-  color: #e6edcf;
+  width: 28px;
+  height: 28px;
+  background: var(--accent);
+  color: #fff;
   display: grid;
   place-items: center;
-  border-radius: 11px;
-  transform: rotate(-8deg);
-}
-.brand-icon svg {
-  transform: rotate(8deg);
-}
-.wordmark-dot {
-  font-size: 10px;
-  align-self: flex-start;
-  margin-top: 5px;
-  letter-spacing: 0;
+  border-radius: 8px;
 }
 .workspace {
   display: flex;
   gap: 10px;
   align-items: center;
   border: 1px solid var(--line);
-  background: #fafbf8;
+  background: #fbfbfb;
   padding: 12px 10px;
   border-radius: 9px;
   margin-top: 36px;
 }
 .workspace-avatar {
-  background: #e6ecd9;
+  background: #e9e9e9;
   padding: 9px 12px;
   border-radius: 6px;
   font-weight: 600;
@@ -182,7 +173,7 @@ code {
 .local-dot {
   width: 6px;
   height: 6px;
-  background: #7b9f68;
+  background: var(--ink);
   border-radius: 50%;
   display: inline-block;
   flex-shrink: 0;
@@ -191,10 +182,11 @@ code {
   margin-left: auto;
 }
 .nav-label {
+  font-family: var(--mono);
   font-size: 10px;
-  color: #6e776a;
-  font-weight: 650;
-  letter-spacing: 1.6px;
+  color: #8a8a8a;
+  font-weight: 500;
+  letter-spacing: 0.1em;
   margin: 32px 14px 13px;
 }
 nav {
@@ -209,23 +201,26 @@ nav button,
   background: transparent;
   border-radius: 7px;
   text-align: left;
-  color: #707770;
+  color: #616161;
   padding: 12px 14px;
   font-size: 13px;
 }
 nav button:hover,
 .settings:hover {
-  background: #f5f7f0;
+  background: #f6f6f6;
 }
 nav button.active,
 .settings.active {
-  background: #edf3e6;
-  color: #35543a;
-  font-weight: 600;
+  background: var(--tint);
+  color: var(--ink);
+  font-weight: 500;
 }
 nav button b {
   margin-left: auto;
-  background: #dce8ce;
+  font-family: var(--mono);
+  font-weight: 500;
+  background: var(--ink);
+  color: #fff;
   font-size: 10px;
   border-radius: 5px;
   min-width: 21px;
@@ -240,15 +235,15 @@ nav button svg {
   padding-top: 32px;
 }
 .approval-note {
-  background: #f7f8f2;
-  border: 1px solid #ecede5;
+  background: #f7f7f7;
+  border: 1px solid #ececec;
   border-radius: 10px;
   padding: 16px 14px;
   margin: 12px 1px 17px;
-  color: #687462;
+  color: #5c5c5c;
 }
 .approval-note > svg {
-  color: #678158;
+  color: #656565;
   margin-bottom: 10px;
 }
 .approval-note strong {
@@ -259,7 +254,7 @@ nav button svg {
   font-size: 11px;
   line-height: 1.7;
   margin-top: 6px;
-  color: #6b7365;
+  color: #5c5c5c;
 }
 .settings {
   width: 100%;
@@ -274,8 +269,8 @@ nav button svg {
 }
 .profile-avatar,
 .small-avatar {
-  background: #edddca;
-  color: #84684b;
+  background: #dfdfdf;
+  color: #575757;
   display: grid;
   place-items: center;
   font-size: 12px;
@@ -290,12 +285,12 @@ nav button svg {
 .profile small {
   display: block;
   font-size: 10px;
-  color: #6f7769;
+  color: #606060;
   margin-top: 5px;
 }
 .profile i {
   display: inline-block;
-  background: #83a574;
+  background: #8d8d8d;
   border-radius: 50%;
   width: 5px;
   height: 5px;
@@ -321,13 +316,13 @@ nav button svg {
   font-size: 11px;
 }
 .breadcrumb > span {
-  color: #6c7569;
+  color: #5e5e5e;
 }
 .breadcrumb > strong {
   font-weight: 500;
 }
 .breadcrumb svg {
-  color: #b1b7aa;
+  color: #afafaf;
 }
 .topbar-note {
   margin-left: auto;
@@ -335,7 +330,7 @@ nav button svg {
   align-items: center;
   gap: 8px;
   font-size: 10px;
-  color: #6d7567;
+  color: #5e5e5e;
 }
 .small-avatar {
   width: 29px;
@@ -354,20 +349,21 @@ nav button svg {
   margin-bottom: 32px;
 }
 .eyebrow {
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 1.8px;
-  color: #69755f;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: #8a8a8a;
   margin-bottom: 12px;
 }
 .page-heading h1 {
-  font-size: 31px;
-  line-height: 1.25;
-  font-weight: 650;
-  letter-spacing: -1.35px;
+  font-size: 34px;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.04em;
 }
 .page-heading p {
-  color: #6a7366;
+  color: #5c5c5c;
   margin-top: 10px;
   font-size: 12px;
 }
@@ -377,10 +373,10 @@ nav button svg {
   justify-content: center;
   gap: 9px;
   white-space: nowrap;
-  border-radius: 7px;
-  padding: 12px 17px;
+  border-radius: 999px;
+  padding: 12px 18px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   transition:
     background 0.15s,
     transform 0.15s;
@@ -389,25 +385,25 @@ nav button svg {
   transform: translateY(-1px);
 }
 .button.primary {
-  background: #365e40;
+  background: var(--ink);
   color: #fff;
-  box-shadow: 0 2px 3px #24472913;
+  box-shadow: 0 1px 2px #0000001f;
 }
 .button.primary:hover {
-  background: #294d32;
+  background: #262626;
 }
 .button.dark {
-  background: #2e4a33;
+  background: var(--ink);
   color: #fff;
   padding: 13px 17px;
 }
 .button.secondary {
   background: #fff;
-  border: 1px solid #e0e5d8;
-  color: #68745e;
+  border: 1px solid #e3e3e3;
+  color: var(--ink);
 }
 .button.secondary:hover {
-  background: #f5f7f0;
+  background: #f6f6f6;
 }
 .button.full {
   width: 100%;
@@ -419,7 +415,7 @@ nav button svg {
   background: transparent;
   font-size: 11px;
   font-weight: 600;
-  color: #607b4e;
+  color: #5e5e5e;
 }
 .icon-button {
   display: inline-flex;
@@ -430,7 +426,7 @@ nav button svg {
   background: transparent;
 }
 .icon-button:hover {
-  background: #eef1e8;
+  background: #f0f0f0;
 }
 .intro-grid {
   display: grid;
@@ -442,10 +438,10 @@ nav button svg {
   display: flex;
   min-height: 300px;
   overflow: hidden;
-  border: 1px solid #dce5cf;
+  border: 1px solid #e1e1e1;
   border-radius: 12px;
-  background: #eaf0dd;
-  background-image: radial-gradient(#b7c69930 0.65px, transparent 0.65px);
+  background: #ededed;
+  background-image: radial-gradient(#bdbdbd30 0.65px, transparent 0.65px);
   background-size: 5px 5px;
 }
 .hero-copy {
@@ -457,7 +453,7 @@ nav button svg {
   font-size: 8px;
   letter-spacing: 1.25px;
   font-weight: 650;
-  color: #819570;
+  color: #7e7e7e;
   display: flex;
   gap: 8px;
   align-items: center;
@@ -469,15 +465,15 @@ nav button svg {
   font-weight: 400;
   letter-spacing: -1.2px;
   margin-top: 17px;
-  color: #344c31;
+  color: #2f2f2f;
 }
 .hero-copy h2 em {
-  color: #6b8052;
+  color: #656565;
 }
 .hero-copy p {
   font-size: 11px;
   line-height: 1.8;
-  color: #7e8c70;
+  color: #767676;
   margin: 15px 0 23px;
 }
 .hero-art {
@@ -493,7 +489,7 @@ nav button svg {
   height: 220px;
   border-radius: 7px;
   padding: 17px;
-  box-shadow: 0 10px 20px #5e71471b;
+  box-shadow: 0 10px 20px #5555551b;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -518,23 +514,23 @@ nav button svg {
 .paper-back {
   right: 0;
   top: 5px;
-  background: #9cac7c;
-  color: #f8f9e9;
+  background: #9a9a9a;
+  color: #f8f8f8;
   transform: rotate(13deg);
   padding-top: 24px;
 }
 .paper-front {
   top: 19px;
   left: 8px;
-  background: #fbf8ed;
-  color: #536144;
+  background: #f8f8f8;
+  color: #464646;
   transform: rotate(-9deg);
 }
 .paper-drawing {
   position: absolute;
   right: 14px;
   top: 40px;
-  color: #869870;
+  color: #828282;
   transform: rotate(26deg);
 }
 .paper-front b {
@@ -546,7 +542,7 @@ nav button svg {
   bottom: 8px;
   font-size: 58px;
   line-height: 1;
-  color: #567444;
+  color: #555555;
   transform: rotate(10deg);
 }
 .readiness-card {
@@ -557,7 +553,7 @@ nav button svg {
 }
 .section-kicker {
   font-size: 9px;
-  color: #9ba28f;
+  color: #939393;
   letter-spacing: 1.3px;
   font-weight: 600;
 }
@@ -578,7 +574,7 @@ nav button svg {
 }
 .readiness-card > button > svg {
   margin-left: auto;
-  color: #a5ae9c;
+  color: #a2a2a2;
 }
 .stat-icon {
   display: grid;
@@ -588,12 +584,12 @@ nav button svg {
   border-radius: 9px;
 }
 .peach {
-  background: #f8eddf;
-  color: #b18c61;
+  background: #eeeeee;
+  color: #818181;
 }
 .sage {
-  background: #edf2e5;
-  color: #8a9e71;
+  background: #f0f0f0;
+  color: #888888;
 }
 .readiness-card button strong {
   font-family: var(--display);
@@ -605,18 +601,18 @@ nav button svg {
 .readiness-card button small {
   display: block;
   font-size: 10px;
-  color: #a0a894;
+  color: #9a9a9a;
   margin-top: 5px;
 }
 .checkin-footer {
   display: flex;
   align-items: center;
   gap: 7px;
-  border-top: 1px solid #eff1e9;
+  border-top: 1px solid #f0f0f0;
   padding-top: 15px;
   margin-top: 9px;
   font-size: 10px;
-  color: #9da78f;
+  color: #989898;
 }
 .format-strip {
   margin: 22px 0 35px;
@@ -635,7 +631,7 @@ nav button svg {
   gap: 15px;
 }
 .format-strip > div > svg {
-  color: #91a37b;
+  color: #8f8f8f;
   stroke-width: 1.5;
 }
 .format-strip strong {
@@ -646,7 +642,7 @@ nav button svg {
 .format-strip small {
   font-size: 10px;
   display: block;
-  color: #9ba38f;
+  color: #949494;
   margin-top: 5px;
 }
 .section-heading {
@@ -665,14 +661,14 @@ nav button svg {
   font-size: 11px;
   letter-spacing: 0;
   font-weight: 400;
-  color: #69745d;
+  color: #5b5b5b;
   margin-left: 7px;
 }
 .search-box {
   display: flex;
   align-items: center;
   gap: 7px;
-  color: #a0a98f;
+  color: #9b9b9b;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -690,7 +686,7 @@ nav button svg {
   outline: none;
 }
 .search-box:focus-within {
-  outline: 3px solid #98b17e;
+  outline: 2px solid var(--ink);
   outline-offset: 3px;
 }
 .tabs {
@@ -702,13 +698,13 @@ nav button svg {
 .tabs button {
   font-size: 11px;
   background: transparent;
-  color: #6a745c;
+  color: #5c5c5c;
   padding: 0 0 13px;
   position: relative;
 }
 .tabs button.selected {
-  color: #466238;
-  font-weight: 600;
+  color: var(--ink);
+  font-weight: 500;
 }
 .tabs button.selected:after {
   content: "";
@@ -717,11 +713,12 @@ nav button svg {
   left: 0;
   right: 0;
   height: 2px;
-  background: #77975c;
+  background: var(--ink);
 }
 .tabs span {
+  font-family: var(--mono);
   margin-left: 6px;
-  background: #eceee3;
+  background: #ededed;
   padding: 2px 5px;
   border-radius: 3px;
   font-size: 9px;
@@ -742,14 +739,14 @@ nav button svg {
 }
 .post-card:hover {
   transform: translateY(-3px);
-  box-shadow: 0 10px 24px #3b533c0a;
+  box-shadow: 0 10px 24px #3636360a;
 }
 .post-art {
   position: relative;
   display: block;
   padding: 14px;
   width: 100%;
-  background: #eef0e7;
+  background: #efefef;
   height: 235px;
   overflow: hidden;
 }
@@ -758,7 +755,7 @@ nav button svg {
   width: auto;
   margin: auto;
   border-radius: 4px;
-  box-shadow: 0 4px 12px #2c402717;
+  box-shadow: 0 4px 12px #26262617;
 }
 .slide-image {
   position: relative;
@@ -771,8 +768,8 @@ nav button svg {
   display: flex;
   gap: 4px;
   align-items: center;
-  color: #77816a;
-  background: #fffdf0ef;
+  color: #6a6a6a;
+  background: #fcfcfcef;
   padding: 5px 7px;
   border-radius: 4px;
   font-size: 8px;
@@ -785,7 +782,7 @@ nav button svg {
   align-items: center;
   justify-content: space-between;
   font-size: 9px;
-  color: #a2ac93;
+  color: #9e9e9e;
   margin-bottom: 10px;
 }
 .status {
@@ -796,8 +793,8 @@ nav button svg {
   white-space: nowrap;
   border-radius: 4px;
   padding: 4px 6px;
-  background: #f5efdf;
-  color: #a08a53;
+  background: #efefef;
+  color: #7a7a7a;
   line-height: 1.2;
 }
 .status i {
@@ -807,16 +804,16 @@ nav button svg {
   background: currentColor;
 }
 .status.approved {
-  background: #edf3e5;
-  color: #759556;
+  background: #f1f1f1;
+  color: #797979;
 }
 .status.published {
-  background: #e9efeb;
-  color: #607f6c;
+  background: #ededed;
+  color: #636363;
 }
 .status.archived {
   background: #eee;
-  color: #757575;
+  color: #616161;
 }
 .post-title {
   display: block;
@@ -834,29 +831,29 @@ nav button svg {
   justify-content: space-between;
   margin-top: 15px;
   padding-top: 12px;
-  border-top: 1px solid #f0f2eb;
+  border-top: 1px solid #f1f1f1;
 }
 .post-footer > span {
   font-size: 9px;
-  color: #9da78e;
+  color: #989898;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .post-footer button {
   background: none;
-  color: #8fa080;
+  color: #8d8d8d;
 }
 .new-post-card {
-  border: 1px dashed #d2dbc5;
+  border: 1px dashed #d7d7d7;
   border-radius: 10px;
   min-height: 270px;
-  background: #f4f6ee;
+  background: #f5f5f5;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #647458;
+  color: #5a5a5a;
 }
 .new-post-card > span {
   height: 48px;
@@ -864,7 +861,7 @@ nav button svg {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: #e9efde;
+  background: #ececec;
   margin-bottom: 19px;
 }
 .new-post-card strong {
@@ -873,7 +870,7 @@ nav button svg {
 }
 .new-post-card small {
   font-size: 10px;
-  color: #667358;
+  color: #5a5a5a;
   margin-top: 8px;
 }
 .page-footer {
@@ -881,10 +878,10 @@ nav button svg {
   align-items: center;
   gap: 7px;
   font-size: 10px;
-  color: #6b745c;
+  color: #5c5c5c;
   margin-top: 43px;
   padding: 18px 0;
-  border-top: 1px solid #ebeee3;
+  border-top: 1px solid #ededed;
 }
 .page-footer > span:last-child {
   margin-left: auto;
@@ -966,8 +963,8 @@ nav button svg {
   width: 47px;
   height: 47px;
   border-radius: 12px;
-  background: #eaf0dc;
-  color: #799662;
+  background: #ededed;
+  color: #7c7c7c;
   font: 25px var(--serif);
   margin-bottom: 21px;
 }
@@ -985,14 +982,14 @@ nav button svg {
   padding-top: 19px;
   font-size: 12px;
   line-height: 1.7;
-  color: #6d7861;
+  color: #606060;
   margin-bottom: 25px;
 }
 .brand-detail > span {
   display: block;
   font-size: 9px;
   letter-spacing: 1.5px;
-  color: #6e7862;
+  color: #606060;
   margin-bottom: 7px;
 }
 .empty-state {
@@ -1001,10 +998,10 @@ nav button svg {
   flex-direction: column;
   align-items: center;
   background: #fff;
-  border: 1px dashed #d5decb;
+  border: 1px dashed #dbdbdb;
   border-radius: 14px;
   padding: 80px 25px;
-  color: #799166;
+  color: #787878;
 }
 .empty-state h2 {
   font-size: 26px;
@@ -1054,10 +1051,10 @@ nav button svg {
   align-items: flex-start;
   gap: 4px;
   line-height: 1.6;
-  color: #7f936b;
+  color: #7b7b7b;
 }
 .rights.missing {
-  color: #b1804f;
+  color: #767676;
 }
 .settings-grid {
   display: grid;
@@ -1093,7 +1090,7 @@ nav button svg {
   margin: 25px 0;
 }
 .settings-card dt {
-  color: #69745d;
+  color: #5b5b5b;
 }
 .settings-card dd {
   margin: 0;
@@ -1107,7 +1104,7 @@ nav button svg {
   justify-content: center;
   flex-direction: column;
   gap: 25px;
-  color: #6f885d;
+  color: #6d6d6d;
 }
 .loading h1 {
   font-size: 27px;
@@ -1143,9 +1140,9 @@ nav button svg {
   pointer-events: none;
   left: 50%;
   transform: translateX(-50%);
-  background: #2f4e36;
-  box-shadow: 0 5px 25px #18292025;
-  color: #f2f7e9;
+  background: var(--ink);
+  box-shadow: 0 5px 25px #14141425;
+  color: #f5f5f5;
   padding: 14px 22px;
   display: flex;
   align-items: center;
@@ -1158,7 +1155,7 @@ nav button svg {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: #1c302553;
+  background: #19191953;
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -1167,14 +1164,14 @@ nav button svg {
   z-index: 150;
 }
 .modal {
-  background: #fafbf7;
+  background: #fafafa;
   border-radius: 15px;
   width: 540px;
   max-width: 100%;
   max-height: 92vh;
   overflow: auto;
   padding: 28px;
-  box-shadow: 0 25px 90px #17281938;
+  box-shadow: 0 25px 90px #13131338;
 }
 .modal.wide {
   width: 760px;
@@ -1209,7 +1206,7 @@ nav button svg {
   font-size: 11px;
   font-weight: 600;
   margin-bottom: 8px;
-  color: #68765c;
+  color: #5d5d5d;
 }
 .field input,
 .field textarea,
@@ -1219,7 +1216,7 @@ nav button svg {
 .field small {
   display: block;
   font-size: 10px;
-  color: #6b765f;
+  color: #5e5e5e;
   margin-top: 6px;
   line-height: 1.6;
 }
@@ -1231,15 +1228,15 @@ nav button svg {
   gap: 12px;
   margin: -4px 0 18px;
   padding: 13px 14px;
-  border: 1px solid #d7dfcb;
+  border: 1px solid #dcdcdc;
   border-radius: 9px;
-  background: #f2f5ec;
-  color: #304a37;
+  background: #f4f4f4;
+  color: #2e2e2e;
   text-align: left;
 }
 .idea-trigger:not(:disabled):hover {
-  border-color: #aebf9d;
-  background: #edf2e5;
+  border-color: #b4b4b4;
+  background: #f0f0f0;
 }
 .idea-trigger:disabled {
   cursor: not-allowed;
@@ -1251,8 +1248,8 @@ nav button svg {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  color: #496647;
-  background: #dfe9d4;
+  color: #484848;
+  background: #e5e5e5;
 }
 .idea-trigger strong,
 .idea-trigger small {
@@ -1263,7 +1260,7 @@ nav button svg {
 }
 .idea-trigger small {
   margin-top: 4px;
-  color: #66715d;
+  color: #585858;
   font-size: 10px;
   line-height: 1.45;
 }
@@ -1278,7 +1275,7 @@ nav button svg {
   margin: -10px 0 18px auto;
   border: 0;
   background: transparent;
-  color: #547152;
+  color: #535353;
   font-size: 11px;
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -1286,9 +1283,9 @@ nav button svg {
 .idea-panel {
   margin: -8px 0 20px;
   padding: 18px;
-  border: 1px solid #dfe5d6;
+  border: 1px solid #e3e3e3;
   border-radius: 10px;
-  background: #f7f9f3;
+  background: #f8f8f8;
 }
 .idea-panel .field {
   margin-bottom: 12px;
@@ -1328,18 +1325,18 @@ nav button svg {
   align-items: start;
   gap: 10px;
   padding: 12px;
-  border: 1px solid #dfe5d6;
+  border: 1px solid #e3e3e3;
   border-radius: 8px;
   background: white;
-  color: #304133;
+  color: #282828;
   text-align: left;
 }
 .idea-card:hover {
-  border-color: #9daf8e;
-  box-shadow: 0 5px 18px #3145290b;
+  border-color: #9f9f9f;
+  box-shadow: 0 5px 18px #2a2a2a0b;
 }
 .idea-card > span {
-  color: #90a183;
+  color: #8e8e8e;
   font-size: 10px;
   letter-spacing: 0.08em;
 }
@@ -1349,7 +1346,7 @@ nav button svg {
 }
 .idea-card p {
   margin: 4px 0 0;
-  color: #75806e;
+  color: #696969;
   font-size: 10px;
   line-height: 1.55;
 }
@@ -1358,7 +1355,7 @@ nav button svg {
   align-items: center;
   gap: 7px;
   margin: -5px 0 17px;
-  color: #61745a;
+  color: #595959;
   font-size: 11px;
 }
 .form-row {
@@ -1376,7 +1373,7 @@ nav button svg {
 }
 .form-note {
   font-size: 11px;
-  color: #6b765f;
+  color: #5e5e5e;
   line-height: 1.7;
 }
 .modal-actions {
@@ -1389,15 +1386,15 @@ nav button svg {
 }
 .upload-zone {
   padding: 30px 18px;
-  border: 1px dashed #c8d4bb;
+  border: 1px dashed #d0d0d0;
   border-radius: 8px;
-  background: #f0f4e8;
+  background: #f2f2f2;
   display: flex;
   align-items: center;
   flex-direction: column;
   gap: 15px;
   margin-bottom: 25px;
-  color: #637251;
+  color: #585858;
 }
 .upload-zone strong {
   font-size: 13px;
@@ -1432,7 +1429,7 @@ nav button svg {
 .day-name {
   padding: 14px;
   font-size: 10px;
-  color: #6e795d;
+  color: #616161;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
@@ -1445,30 +1442,30 @@ nav button svg {
 }
 .calendar-day > span {
   font-size: 11px;
-  color: #6d7960;
+  color: #616161;
 }
 .calendar-day.today > span {
   display: inline-grid;
   place-items: center;
-  background: #567843;
+  background: #585858;
   color: white;
   border-radius: 50%;
   width: 23px;
   height: 23px;
 }
 .calendar-day.outside {
-  background: #f8f9f4;
+  background: #f8f8f8;
 }
 .calendar-day.outside > span {
-  color: #69755a;
+  color: #5c5c5c;
 }
 .calendar-day button {
   display: block;
   text-align: left;
   width: 100%;
-  border-left: 2px solid #94ad7d;
+  border-left: 2px solid #999999;
   border-radius: 4px;
-  background: #edf3e5;
+  background: #f1f1f1;
   margin-top: 8px;
   padding: 7px;
   font-size: 10px;
@@ -1477,12 +1474,12 @@ nav button svg {
 .calendar-day button small {
   display: block;
   font-size: 8px;
-  color: #68765f;
+  color: #5d5d5d;
 }
 .calendar-event-time {
   display: block;
   font-weight: 700;
-  color: var(--green);
+  color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
 .calendar-event-title {
@@ -1510,25 +1507,25 @@ nav button svg {
   display: inline-flex;
   padding: 5px 9px;
   border-radius: 5px;
-  background: #f3ead6;
-  color: #7c6131;
+  background: #eaeaea;
+  color: #4e4e4e;
   font-size: 11px;
   font-weight: 600;
 }
 .schedule-status.approved,
 .schedule-status.published {
-  background: #e5eddf;
-  color: var(--green);
+  background: #eaeaea;
+  color: var(--accent);
 }
 .schedule-time {
   display: flex;
   align-items: flex-start;
   gap: 12px;
   padding: 16px;
-  background: #edf2e7;
-  border: 1px solid #e0e7d8;
+  background: #f0f0f0;
+  border: 1px solid #e4e4e4;
   border-radius: 9px;
-  color: var(--green);
+  color: var(--accent);
 }
 .schedule-time > svg {
   flex-shrink: 0;
@@ -1562,7 +1559,7 @@ nav button svg {
   margin: 20px 0 0;
 }
 .schedule-facts dt {
-  color: #687465;
+  color: #5c5c5c;
   font-size: 11px;
   margin-bottom: 5px;
 }
@@ -1592,7 +1589,7 @@ nav button svg {
 .schedule-delivery {
   margin-top: 20px;
   font-size: 11px;
-  color: #687465;
+  color: #5c5c5c;
   line-height: 1.7;
 }
 .schedule-actions {
@@ -1633,9 +1630,9 @@ table {
 }
 th {
   font-size: 10px;
-  color: #859373;
+  color: #7e7e7e;
   font-weight: 500;
-  background: #f0f4e8;
+  background: #f2f2f2;
 }
 td,
 th {
@@ -1649,7 +1646,7 @@ td small {
   display: block;
   margin-top: 6px;
   font-size: 9px;
-  color: #92a07f;
+  color: #8d8d8d;
 }
 td a {
   font-weight: 500;
@@ -1657,7 +1654,7 @@ td a {
 .editor-overlay {
   position: fixed;
   inset: 0;
-  background: #f5f7f1;
+  background: #f6f6f6;
   z-index: 70;
   display: flex;
   flex-direction: column;
@@ -1689,7 +1686,7 @@ td a {
 }
 .editor-header small {
   font-size: 10px;
-  color: #929d87;
+  color: #8b8b8b;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1717,13 +1714,13 @@ td a {
   justify-content: space-between;
   font-size: 8px;
   letter-spacing: 1px;
-  color: #939e87;
+  color: #8d8d8d;
   margin-bottom: 24px;
 }
 .rail-heading b {
   font-size: 9px;
   font-weight: 500;
-  background: #f0f4e8;
+  background: #f2f2f2;
   border-radius: 3px;
   padding: 3px 5px;
 }
@@ -1743,7 +1740,7 @@ td a {
   border-radius: 3px;
   padding: 2px 4px;
   font-size: 8px;
-  color: #68765a;
+  color: #5d5d5d;
 }
 .slide-thumb > div {
   aspect-ratio: 4/5;
@@ -1756,7 +1753,7 @@ td a {
   text-align: left;
 }
 .slide-thumb.selected > div {
-  outline: 2px solid #74935b;
+  outline: 2px solid #777777;
   outline-offset: 3px;
 }
 .slide-thumb b {
@@ -1765,7 +1762,7 @@ td a {
 .slide-thumb small {
   display: block;
   font-size: 9px;
-  color: #9aa58e;
+  color: #959595;
   margin-top: 7px;
   text-transform: capitalize;
 }
@@ -1780,7 +1777,7 @@ td a {
   flex-direction: column;
   align-items: center;
   padding: 24px 25px;
-  background-image: radial-gradient(#d6dccb 1px, transparent 1px);
+  background-image: radial-gradient(#d9d9d9 1px, transparent 1px);
   background-size: 16px 16px;
 }
 .canvas-toolbar {
@@ -1793,26 +1790,26 @@ td a {
 }
 .canvas-toolbar > span {
   font-size: 8px;
-  color: #9aa68b;
+  color: #969696;
   letter-spacing: 1px;
 }
 .segmented {
   display: flex;
-  background: #e9ede1;
+  background: #ebebeb;
   border-radius: 6px;
   padding: 3px;
 }
 .segmented button {
   font-size: 10px;
   background: transparent;
-  color: #8a9978;
+  color: #858585;
   padding: 7px 11px;
   border-radius: 4px;
 }
 .segmented .selected {
   background: #fff;
-  color: #5f774d;
-  box-shadow: 0 1px 3px #26371a0b;
+  color: #5a5a5a;
+  box-shadow: 0 1px 3px #1e1e1e0b;
 }
 .canvas-wrap {
   width: 100%;
@@ -1826,7 +1823,7 @@ td a {
   width: 100%;
   max-width: 420px;
   max-height: 65vh;
-  box-shadow: 0 12px 35px #32482918;
+  box-shadow: 0 12px 35px #2c2c2c18;
   border-radius: 2px;
 }
 .slide-image.editor-canvas {
@@ -1901,12 +1898,12 @@ td a {
 }
 .canvas-nav span {
   font-size: 10px;
-  color: #8e9d7c;
+  color: #898989;
 }
 .canvas-help {
   font-size: 10px;
   line-height: 1.7;
-  color: #9ba78d;
+  color: #979797;
   text-align: center;
 }
 .inspector {
@@ -1920,7 +1917,7 @@ td a {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 23px;
-  color: #6f815f;
+  color: #676767;
 }
 .inspector-heading h3 {
   font-size: 15px;
@@ -1948,7 +1945,7 @@ td a {
   align-items: center;
   font-size: 8px;
   letter-spacing: 1.4px;
-  color: #9daa8e;
+  color: #9b9b9b;
   margin-bottom: 18px;
 }
 .section-label > div {
@@ -1961,11 +1958,11 @@ td a {
 .archive {
   display: block;
   margin: 20px auto 8px;
-  color: #a18f7c;
+  color: #828282;
   font-weight: 400;
 }
 .review-bar {
-  border-top: 1px solid #dce4d1;
+  border-top: 1px solid #e1e1e1;
   background: #fff;
   padding: 17px 25px;
   display: flex;
@@ -1985,17 +1982,17 @@ td a {
 }
 .review-bar small {
   font-size: 10px;
-  color: #8e9e7b;
+  color: #8a8a8a;
   display: block;
   margin-top: 6px;
 }
 .review-bar > div > svg {
-  color: #7b965f;
+  color: #7c7c7c;
 }
 .review-flags {
   flex-basis: 100%;
   font-size: 11px;
-  color: #a07d4f;
+  color: #6f6f6f;
 }
 .editor-error {
   margin: 0;
@@ -2181,7 +2178,6 @@ td a {
     font-size: 0;
     gap: 0;
   }
-  .wordmark-dot,
   .workspace,
   .nav-label,
   .sidebar nav button span,
@@ -2192,7 +2188,6 @@ td a {
   .settings {
     font-size: 0;
   }
-  .wordmark-dot,
   .workspace,
   .nav-label,
   .approval-note,
@@ -2572,8 +2567,8 @@ td a {
   gap: 6px;
   padding: 14px;
   text-align: center;
-  background: #f6efe8;
-  color: #7a4220;
+  background: #f0f0f0;
+  color: #363636;
   font-size: 11px;
   line-height: 1.4;
 }

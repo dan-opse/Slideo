@@ -25,7 +25,6 @@ import {
   FolderOpen,
   ImagePlus,
   Layers3,
-  Leaf,
   LayoutDashboard,
   Loader2,
   Pencil,
@@ -57,7 +56,7 @@ type View =
   | "Calendar"
   | "Results"
   | "Settings";
-const views: { name: View; icon: typeof Leaf }[] = [
+const views: { name: View; icon: typeof LayoutDashboard }[] = [
   { name: "Overview", icon: LayoutDashboard },
   { name: "Review queue", icon: CheckCheck },
   { name: "Formats", icon: Layers3 },
@@ -95,6 +94,32 @@ async function api(action: string, data: Record<string, unknown> = {}) {
       body.error || "The studio did not respond correctly. Try again.",
     );
   return body;
+}
+function SlideoMark({ size }: { size: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <rect
+        x="8.5"
+        y="2.5"
+        width="11"
+        height="15"
+        rx="2.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <rect
+        x="4.5"
+        y="6.5"
+        width="11"
+        height="15"
+        rx="2.5"
+        fill="currentColor"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+    </svg>
+  );
 }
 function IconButton({
   label,
@@ -669,8 +694,8 @@ export default function Studio() {
   if (!state)
     return (
       <main className="loading">
-        <Leaf size={40} />
-        <h1>Opening your studio</h1>
+        <SlideoMark size={40} />
+        <h1>Opening Slideo</h1>
         {error ? <p role="alert">{error}</p> : <Loader2 className="spin" />}
       </main>
     );
@@ -701,17 +726,17 @@ export default function Studio() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <Link className="wordmark" href="/" aria-label="Fieldwork home">
+        <Link className="wordmark" href="/" aria-label="Slideo home">
           <span className="brand-icon">
-            <Leaf size={22} />
+            <SlideoMark size={16} />
           </span>
-          fieldwork<span className="wordmark-dot">®</span>
+          Slideo
         </Link>
         <div className="workspace">
           <span className="workspace-avatar">D</span>
           <div>
             <strong>Personal studio</strong>
-            <small>Your own little corner</small>
+            <small>Local workspace</small>
           </div>
           <span className="local-dot" title="Local workspace" />
         </div>
@@ -736,7 +761,7 @@ export default function Studio() {
         <div className="sidebar-bottom">
           <div className="approval-note">
             <ShieldCheck size={19} />
-            <strong>A human touch, always.</strong>
+            <strong>Human-approved.</strong>
             <p>Every post waits for your approval before export.</p>
           </div>
           <button
@@ -789,33 +814,33 @@ export default function Studio() {
           )}
           <div className="page-heading">
             <div>
-              <div className="eyebrow">YOUR CONTENT, CULTIVATED.</div>
+              <div className="eyebrow">SLIDEO / {view.toUpperCase()}</div>
               <h1>
                 {view === "Overview"
                   ? "Your slideshows."
                   : view === "Review queue"
-                    ? "Ready for your eyes."
+                    ? "Ready for review."
                     : view === "Formats"
-                      ? "Find your signature."
+                      ? "Your formats."
                       : view === "Assets"
-                        ? "A library of possibilities."
+                        ? "Your assets."
                         : view === "Brands"
-                          ? "Give your content a voice."
+                          ? "Your brands."
                           : view === "Calendar"
-                            ? "A little room to plan."
+                            ? "Your calendar."
                             : view === "Results"
-                              ? "Learn from what you share."
-                              : "Make yourself at home."}
+                              ? "Your results."
+                              : "Settings."}
               </h1>
               <p>
                 {view === "Overview"
                   ? "Turn a good idea into your next great post."
                   : view === "Review queue"
-                    ? "A final look before your ideas head out into the world."
+                    ? "A final look before anything ships."
                     : view === "Formats"
                       ? "Reusable layouts and writing directions. Consistency, without repetition."
                       : view === "Assets"
-                        ? "Your own images, thoughtfully collected and ready to use."
+                        ? "Your own images, collected and ready to use."
                         : view === "Brands"
                           ? "The facts, audience, and tone behind every draft."
                           : view === "Calendar"
@@ -831,7 +856,7 @@ export default function Studio() {
                 onClick={() => setCreate(true)}
               >
                 <Plus size={18} />
-                Let’s create a slideshow
+                Create slideshow
               </button>
             )}
             {view === "Assets" && (
@@ -987,7 +1012,7 @@ export default function Studio() {
                     }}
                     onClick={() => setFormatEdit(f)}
                   >
-                    <span>THE FIELDWORK COLLECTION</span>
+                    <span>THE SLIDEO COLLECTION</span>
                     <b>
                       {f.name}
                       <em style={{ color: f.accent }}>
@@ -1198,9 +1223,9 @@ export default function Studio() {
             </div>
           )}
           <footer className="page-footer">
-            <Leaf size={14} />
-            <span>A little intention goes a long way.</span>
-            <span>FIELDWORK · PERSONAL STUDIO</span>
+            <SlideoMark size={14} />
+            <span>Nothing ships without your approval.</span>
+            <span>SLIDEO · PERSONAL STUDIO</span>
           </footer>
         </main>
       </div>
@@ -1760,7 +1785,7 @@ function Results({
     const url = URL.createObjectURL(new Blob([data], { type: "text/csv" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = "fieldwork-results.csv";
+    a.download = "slideo-results.csv";
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };

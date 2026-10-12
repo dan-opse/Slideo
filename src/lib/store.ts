@@ -319,118 +319,19 @@ function seed() {
   const brand: Brand = {
     // Keep this stable ID so existing template posts retain their brand link.
     id: "demo-brand",
-    name: "Pobi",
-    product:
-      "Pobi is an AI-powered sports-betting tool that helps users evaluate sportsbook promotions. It reads profit boosts, ranks opportunities by expected value, searches supported sportsbooks for favorable markets and lower vig, builds suggested parlays, and tracks what bets actually paid.",
-    audience:
-      "Adults 21+ in North America who already use supported sportsbooks and want a faster, more analytical way to assess promotions, compare markets, and track betting results.",
-    tone: "Confident, analytical, concise, and transparent. Explain the reasoning behind an edge in plain language. Sound like a sharp, disciplined friend: direct and energetic, never reckless, boastful, or pushy.",
-    facts:
-      "Verified from pobi.bet on September 11, 2026: Pobi supports major North American sportsbooks; users can add sportsbook boosts, compare props and vig, build suggested parlays, and track payouts/results. The site offers a 7-day free trial, followed by $9.99 monthly or $89.99 yearly, with unlimited use across supported books and cancellation at any time. Pobi states that it is not affiliated with any sportsbook. Recheck pricing, availability, supported books, and performance figures before publishing time-sensitive content.",
-    prohibited:
-      "Never promise wins, profit, guaranteed returns, risk-free betting, or a specific hit rate. Never present founder-account results, demonstrations, or historical performance as typical customer outcomes. Do not invent edges, odds, sportsbook support, testimonials, statistics, or product capabilities. Do not target or depict anyone under 21. Do not encourage chasing losses, oversized wagers, urgency, debt, or betting as income. Keep responsible-gambling language visible where appropriate and never imply that AI removes betting risk.",
-    destination: "https://www.pobi.bet",
+    name: "My brand",
+    product: "",
+    audience: "",
+    tone: "",
+    facts: "",
+    prohibited: "",
+    destination: "",
   };
-
-  // Upgrade an untouched installation from the original placeholder brief.
-  const existingBrand = list<Brand>("brand").find(
-    (item) => item.id === brand.id,
-  );
-  if (existingBrand?.name === "The Sunday Studio") {
-    put("brand", brand);
-    audit("brand.template_migrated_to_pobi", brand.id);
-  }
 
   const existingFormats = migrateFormatSlideCounts();
   if (existingFormats.length) return;
-  const formats: Format[] = [
-    {
-      id: "field-notes",
-      name: "Field notes",
-      description: "Thoughtful lists, one useful idea at a time.",
-      instructions:
-        "A strong hook, four practical insights, and a gentle call to action. Be specific and avoid hype.",
-      color: "#e9eddf",
-      ink: "#243d2e",
-      accent: "#8ca17a",
-      aspect: "portrait",
-      font: "serif",
-      slideCount: 6,
-    },
-    {
-      id: "hard-truths",
-      name: "The reality check",
-      description: "Common mistakes. Better ways forward.",
-      instructions:
-        "Open with a common mistake, explain four concrete fixes, close with an actionable next step.",
-      color: "#232e2a",
-      ink: "#f6f1e7",
-      accent: "#d6ef80",
-      aspect: "portrait",
-      font: "sans",
-      slideCount: 6,
-    },
-    {
-      id: "daily-practice",
-      name: "In practice",
-      description: "A simple, repeatable product story.",
-      instructions:
-        "Start with a real problem, show four useful applications supported by brand facts, end with a helpful CTA.",
-      color: "#f5e4d6",
-      ink: "#57392d",
-      accent: "#c8754c",
-      aspect: "story",
-      font: "serif",
-      slideCount: 6,
-    },
-  ];
-  formats.forEach((f) => put("format", f));
+  // TikTok photo story is the only starter format; addPhotoPreset adds it.
   put("brand", brand);
-  const f = formats[0];
-  const titles = [
-    "Make room for your next good idea.",
-    "Start before you feel ready.",
-    "Keep one small promise.",
-    "Collect what catches your eye.",
-    "Leave a little unfinished.",
-    "Your practice. Your pace.",
-  ];
-  const bodies = [
-    "A small field guide to a more intentional creative practice.",
-    "Set aside ten minutes. Open a page. Give yourself permission to make something imperfect.",
-    "Choose a routine that fits the day you actually have, rather than the one you wish you had.",
-    "A sentence, a texture, an unexpected color. Give your ideas somewhere to land.",
-    "Write down your next step before you stop. Make it easy to come back tomorrow.",
-    "Save this for the next time you need a fresh start.",
-  ];
-  savePost({
-    title: "Make room for your next good idea",
-    topic: "A sustainable creative practice",
-    brandId: brand.id,
-    formatId: f.id,
-    aspect: f.aspect,
-    caption:
-      "A few small ways to make space for your creative practice. What helps you come back to your work?\n\n#creativepractice #fieldnotes",
-    account: "",
-    plannedAt: "",
-    notes: "Example content — review and adapt to your own brand.",
-    flags: [],
-    slides: titles.map((title, i) => ({
-      id: uid(),
-      role: i === 0 ? "hook" : i === 5 ? "cta" : "body",
-      title,
-      body: bodies[i],
-      assetId: null,
-      background: i === 5 ? "#243d2e" : f.color,
-      ink: i === 5 ? "#f6f1e7" : f.ink,
-      accent: f.accent,
-      font: f.font,
-      align: "left",
-      position: "center",
-      fontSize: 82,
-      overlay: 0.35,
-    })),
-  });
 }
 // Add the new preset once without changing existing formats or approved posts.
 function addPhotoPreset() {

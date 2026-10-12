@@ -20,19 +20,20 @@ import {
   fitText,
 } from "../src/lib/photo-layout";
 import { postSchema, photoTextSchema, type Post } from "../src/lib/schema";
-const folder = mkdtempSync(path.join(tmpdir(), "fieldwork-photo-test-"));
+import { seedSamplePost } from "./sample-post";
+const folder = mkdtempSync(path.join(tmpdir(), "slideo-photo-test-"));
 process.env.STUDIO_DATA_DIR = folder;
 const store = await import("../src/lib/store");
 const { photoFont, renderPhotoSlide } = await import("../src/lib/photo-render");
 const { renderAll } = await import("../src/lib/render");
 const font = await photoFont();
-const original = store.list<Post>("post")[0];
+const original = seedSamplePost(store);
 const reference = defaultText(
   "5 changes i made to detach\nfrom emotional betting:",
   "text-1",
 );
 const regressionCopy = [
-  "A Boost Isn’t The Whole Picture\n\nPobi helps evaluate promotions alongside available markets and pricing across supported sportsbooks.",
+  "A Boost Isn’t The Whole Picture\n\nThis app helps evaluate promotions alongside available markets and pricing across supported sportsbooks.",
   "Check The Vig Too\n\nComparing vig can add context when reviewing which supported market may fit a promotion.",
   "Keep Risk In The Frame\n\nBetter information does not remove betting risk. Set limits, and never chase losses.",
 ];

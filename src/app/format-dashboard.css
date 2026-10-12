@@ -2,7 +2,7 @@
   position: fixed;
   inset: 0;
   z-index: 60;
-  background: #28332bb3;
+  background: #1d1d1db3;
   padding: 20px;
 }
 .fd-backdrop[hidden] {
@@ -18,14 +18,14 @@
   border: 1px solid #fff8;
   border-radius: 18px;
   overflow: hidden;
-  box-shadow: 0 28px 100px #16211b38;
+  box-shadow: 0 28px 100px #10101038;
 }
 .fd-window:focus {
   outline: none;
 }
 .fd-sidebar {
-  background: #f6f6f4;
-  border-right: 1px solid #e7e7e3;
+  background: #f6f6f6;
+  border-right: 1px solid #e7e7e7;
   display: flex;
   flex-direction: column;
   padding: 20px 14px;
@@ -37,7 +37,7 @@
   align-items: center;
   gap: 9px;
   background: transparent;
-  color: #6b716b;
+  color: #5b5b5b;
   padding: 0 9px 20px;
   font-size: 12px;
 }
@@ -46,7 +46,7 @@
   align-items: center;
   gap: 10px;
   padding: 14px 11px;
-  border: 1px solid #ebebe6;
+  border: 1px solid #ebebeb;
   background: #fff;
   border-radius: 13px;
   margin-bottom: 20px;
@@ -57,7 +57,7 @@
   width: 35px;
   height: 35px;
   border-radius: 50%;
-  background: #273b2f;
+  background: var(--ink);
   color: #fff;
   font-size: 16px;
   flex-shrink: 0;
@@ -69,7 +69,7 @@
 .fd-brand small {
   display: block;
   font-size: 10px;
-  color: #72766f;
+  color: #616161;
   margin-bottom: 3px;
 }
 .fd-brand select {
@@ -77,7 +77,7 @@
   border: none;
   background: transparent;
   padding: 0;
-  color: #27362d;
+  color: #1f1f1f;
   font-size: 12px;
   font-weight: 600;
 }
@@ -94,7 +94,7 @@
   min-height: 46px;
   padding: 10px 12px;
   background: transparent;
-  color: #6c706a;
+  color: #5a5a5a;
   font-size: 12px;
   border-radius: 7px;
 }
@@ -105,12 +105,12 @@
   flex-shrink: 0;
 }
 .fd-sidebar nav button.active {
-  background: #e9eee4;
-  color: #294d35;
+  background: #ececec;
+  color: #2e2e2e;
   font-weight: 600;
 }
 .fd-sidebar nav button:hover {
-  background: #eceee9;
+  background: #ededed;
 }
 .fd-sidebar nav button:nth-child(2),
 .fd-sidebar nav button:nth-child(4) {
@@ -122,7 +122,7 @@
 .fd-sidebar-bottom {
   margin-top: auto;
   padding: 30px 10px 0;
-  color: #6a7166;
+  color: #5a5a5a;
 }
 .fd-sidebar-bottom p {
   display: flex;
@@ -158,7 +158,7 @@
   justify-content: space-between;
   gap: 15px;
   padding: 12px 25px;
-  border-bottom: 1px solid #e9eae5;
+  border-bottom: 1px solid #e9e9e9;
   background: #fff;
 }
 .fd-toolbar > span {
@@ -166,7 +166,7 @@
   align-items: center;
   gap: 8px;
   font-size: 10px;
-  color: #70766d;
+  color: #606060;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -179,14 +179,14 @@
 }
 .fd-toolbar small {
   font-size: 10px;
-  color: #71766d;
+  color: #606060;
 }
 .fd-save {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
-  background: #ff4d27;
+  background: #0a0a0a;
   color: #fff;
   font-size: 12px;
   font-weight: 600;
@@ -223,17 +223,17 @@
   background: #fff0e9;
 }
 .fd-notice {
-  color: #365d3d;
-  background: #edf4e7;
+  color: #3c3c3c;
+  background: #f2f2f2;
 }
 .fd-cover {
   height: 148px;
-  background: radial-gradient(ellipse at 50% 100%, #687166, #343b34 72%);
+  background: radial-gradient(ellipse at 50% 100%, #3a3a3a, #0a0a0a 72%);
   display: flex;
   justify-content: flex-end;
   align-items: center;
   padding-right: 50px;
-  color: #dce6d02e;
+  color: #e2e2e22e;
 }
 .fd-profile {
   max-width: 740px;
@@ -246,9 +246,9 @@
   display: grid;
   place-items: center;
   margin: 0 auto 17px;
-  background: #233d2b;
+  background: var(--ink);
   border: 4px solid #fff;
-  color: #e6eddb;
+  color: #eaeaea;
   width: 72px;
   height: 72px;
   border-radius: 50%;
@@ -262,12 +262,12 @@
 }
 .fd-profile h1 button {
   background: transparent;
-  color: #9ca596;
+  color: #969696;
   padding: 3px;
 }
 .fd-profile p {
   font-size: 12px;
-  color: #72766f;
+  color: #616161;
   line-height: 1.7;
   margin-top: 6px;
 }
@@ -288,7 +288,7 @@
   font-size: 16px;
 }
 .fd-recent h2 span {
-  color: #6b7365;
+  color: #5c5c5c;
   font-weight: 400;
 }
 .fd-recent header > div {
@@ -301,11 +301,11 @@
   padding: 8px;
   width: auto;
   font-size: 11px;
-  color: #6d7864;
+  color: #606060;
 }
 .fd-recent header button {
   background: transparent;
-  color: #426844;
+  color: #474747;
   font-size: 12px;
 }
 .fd-post-grid {
@@ -322,7 +322,7 @@
   position: relative;
   border-radius: 9px;
   overflow: hidden;
-  background: #eef0e9;
+  background: #efefef;
 }
 .fd-post img {
   object-fit: cover;
@@ -346,15 +346,15 @@
   line-height: 1.6;
 }
 .fd-post small {
-  color: #808977;
+  color: #747474;
   font-size: 10px;
 }
 .fd-empty {
   text-align: center;
   padding: 55px 20px;
-  border: 1px dashed #dce2d3;
+  border: 1px dashed #e0e0e0;
   border-radius: 10px;
-  color: #728364;
+  color: #6a6a6a;
 }
 .fd-empty svg {
   margin: auto;
@@ -362,7 +362,7 @@
 .fd-empty h3 {
   font-size: 18px;
   margin-top: 18px;
-  color: #334d33;
+  color: #303030;
 }
 .fd-empty p {
   font-size: 12px;
@@ -383,7 +383,7 @@
 .fd-writing > p,
 .fd-settings > p,
 .fd-schedule > p {
-  color: #70776a;
+  color: #616161;
   line-height: 1.7;
   font-size: 13px;
   margin: 8px 0 23px;
@@ -391,19 +391,19 @@
 .fd-tabs {
   display: flex;
   gap: 24px;
-  border-bottom: 1px solid #e7e8e3;
+  border-bottom: 1px solid #e7e7e7;
   margin-bottom: 25px;
 }
 .fd-tabs button {
   padding: 0 0 12px;
   background: transparent;
   border-bottom: 2px solid transparent;
-  color: #6a7165;
+  color: #5a5a5a;
   font-size: 12px;
 }
 .fd-tabs button[aria-selected="true"] {
-  color: #253a2c;
-  border-bottom-color: #253a2c;
+  color: #212121;
+  border-bottom-color: #212121;
 }
 .fd-field {
   display: flex;
@@ -413,7 +413,7 @@
   min-width: 0;
 }
 .fd-field > span {
-  color: #485840;
+  color: #3d3d3d;
   font-size: 11px;
   font-weight: 500;
 }
@@ -421,11 +421,11 @@
 .fd-field select,
 .fd-field textarea {
   width: 100%;
-  border: 1px solid #e0e5db;
+  border: 1px solid #e3e3e3;
   border-radius: 9px;
   background: #fff;
   padding: 10px 12px;
-  color: #29372d;
+  color: #202020;
   font-size: 12px;
   min-width: 0;
 }
@@ -439,11 +439,11 @@
 }
 .fd-field input[type="range"] {
   padding: 0;
-  accent-color: #476c48;
+  accent-color: #4c4c4c;
 }
 .fd-field small,
 .fd-help {
-  color: #6b7365;
+  color: #5c5c5c;
   font-size: 11px;
   line-height: 1.7;
 }
@@ -453,10 +453,10 @@
   gap: 14px;
 }
 .fd-hook-generator {
-  border: 1px solid #e5e8e0;
+  border: 1px solid #e7e7e7;
   padding: 18px;
   border-radius: 12px;
-  background: #f8f9f6;
+  background: #f9f9f9;
   margin-bottom: 24px;
 }
 .fd-hook-generator .fd-field {
@@ -467,7 +467,7 @@
   font-size: 11px;
   line-height: 1.6;
   margin-top: 12px;
-  color: #7e846f;
+  color: #6f6f6f;
 }
 .fd-field .fd-hook-list {
   min-height: 300px;
@@ -477,7 +477,7 @@
 .fd-preset-note {
   padding: 13px 15px;
   border-radius: 8px;
-  background: #f0f4eb;
+  background: #f2f2f2;
 }
 .fd-schedule .calendar {
   margin-top: 24px;
@@ -495,8 +495,8 @@
 .fd-template-controls {
   display: flex;
   flex-direction: column;
-  background: #f6f6f5;
-  border-right: 1px solid #e3e5de;
+  background: #f6f6f6;
+  border-right: 1px solid #e4e4e4;
   min-height: 0;
 }
 .fd-template-controls .fd-tabs {
@@ -511,14 +511,14 @@
   min-height: 0;
 }
 .fd-template-options details {
-  border-top: 1px solid #e2e6dc;
+  border-top: 1px solid #e4e4e4;
   margin-top: 15px;
   padding-top: 18px;
 }
 .fd-template-options summary {
   cursor: pointer;
   font-size: 11px;
-  color: #69735e;
+  color: #5b5b5b;
   margin-bottom: 20px;
 }
 .fd-collection-strip {
@@ -534,7 +534,7 @@
 }
 .fd-collection-strip small {
   font-size: 10px;
-  color: #6a7164;
+  color: #5a5a5a;
   line-height: 1.6;
 }
 .fd-toggle {
@@ -558,7 +558,7 @@
 .fd-toggle i {
   width: 36px;
   height: 21px;
-  background: #dedfdc;
+  background: #dfdfdf;
   border-radius: 15px;
   padding: 3px;
   pointer-events: none;
@@ -574,17 +574,17 @@
   transition: transform 0.15s;
 }
 .fd-toggle input:checked + i {
-  background: #3688ed;
+  background: #0a0a0a;
 }
 .fd-toggle input:checked + i:before {
   transform: translateX(15px);
 }
 .fd-toggle input:focus-visible + i {
-  outline: 3px solid #98b17e;
+  outline: 2px solid var(--ink);
   outline-offset: 3px;
 }
 .fd-template-stage {
-  background: #bdbebb;
+  background: #bababa;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -599,7 +599,7 @@
 }
 .fd-template-stage > header > span {
   font-size: 9px;
-  color: #484d45;
+  color: #363636;
   letter-spacing: 0.1em;
 }
 .fd-template-stage > header div {
@@ -611,12 +611,12 @@
   place-items: center;
   padding: 7px;
   border-radius: 6px;
-  background: #d5d6d2;
-  color: #777d72;
+  background: #d5d5d5;
+  color: #686868;
 }
 .fd-template-stage > header button[aria-pressed="true"] {
   background: #fff;
-  color: #33472d;
+  color: #2c2c2c;
 }
 .fd-template-slides {
   display: flex;
@@ -636,7 +636,7 @@
 .fd-template-slides > button > span {
   display: block;
   font-size: 11px;
-  color: #494d44;
+  color: #363636;
   margin-bottom: 12px;
 }
 .fd-template-slides .photo-canvas {
@@ -644,7 +644,7 @@
   border-radius: 7px;
 }
 .fd-template-slides > button.selected .photo-canvas {
-  outline: 3px solid #0085ff;
+  outline: 3px solid #0a0a0a;
   outline-offset: 1px;
 }
 .fd-template-slides.grid {
@@ -658,7 +658,7 @@
   margin: 0 18px 22px;
   padding: 20px;
   border-radius: 12px;
-  background: #fbfcfa;
+  background: #fcfcfc;
   flex-shrink: 0;
 }
 .fd-font-controls {
@@ -677,7 +677,7 @@
   inset: 0;
   display: grid;
   place-items: center;
-  background: #24362666;
+  background: #1e1e1e66;
   padding: 20px;
   z-index: 2;
 }
@@ -692,7 +692,7 @@
 }
 .fd-confirm p {
   font-size: 13px;
-  color: #78816e;
+  color: #6b6b6b;
   margin: 14px 0 25px;
 }
 .fd-confirm .button {
@@ -738,7 +738,7 @@
     flex-shrink: 0;
     padding: 10px;
     border-right: 0;
-    border-bottom: 1px solid #e7e7e3;
+    border-bottom: 1px solid #e7e7e7;
     overflow: visible;
   }
   .fd-back {

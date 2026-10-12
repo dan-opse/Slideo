@@ -186,7 +186,7 @@ Priority definitions: **P0** required for the personal MVP; **P1** next release;
 | ID    | Priority | Requirement and acceptance                                                                                                                                               |
 | ----- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | BR-01 | P0       | Create/edit multiple briefs with product, audience, benefit, tone, approved facts, prohibited claims, and destination. Generation always records the brief version used. |
-| BR-02 | P0       | Provide three original starter formats: educational list, mistakes-and-fixes, and product-use examples. Each produces a valid six-slide sample.                          |
+| BR-02 | P0       | Provide one starter format, TikTok photo story. Further formats are curated by hand from trending TikTok and Instagram slideshows.                                       |
 | BR-03 | P0       | Show readiness checks for assets, model credentials, and a successful sample. No TikTok connection is required to start.                                                 |
 | BR-04 | P1       | Import public website copy as an editable draft brief. Imported text cannot alter system instructions, credentials, or publishing permissions.                           |
 

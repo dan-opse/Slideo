@@ -1,6 +1,6 @@
-# Fieldwork
+# Slideo
 
-Fieldwork is a private, local slideshow studio inspired by ReelFarm's core workflow. It creates editable photo-carousels from reusable formats, requires approval for each exact revision, and exports an ordered TikTok-ready package for manual publishing.
+Slideo is a private, local slideshow studio inspired by ReelFarm's core workflow. It creates editable photo-carousels from reusable formats, requires approval for each exact revision, and exports an ordered TikTok-ready package for manual publishing.
 
 ## Run it
 
@@ -15,7 +15,7 @@ The app works without an AI provider. To enable website ideas and AI writing, co
 
 ## Current workflow
 
-1. Review the included Pobi brand brief and update it whenever product details or pricing change.
+1. Fill in the starter brand brief (or add your own) with your product, audience, tone, and verified facts.
 2. Upload images you own or are licensed to use, recording their rights. **Edit details** on an image updates its name, collection, or rights; removing an image hides it from pickers while slideshows that already use it keep it.
 3. Create a manual or AI-assisted draft from a reusable format.
 4. Edit the slide copy, layout, colors, background images, caption, account, and planned time.
