@@ -50,7 +50,7 @@ Local verification used Node v24.21.0; CI specifies Node 22. Runtime reproductio
 
 #### R01 — High: Generated text geometry can violate the post schema
 
-- [ ] Fixed and verified.
+- [x] Fixed and verified in `61d9a62`. `tests/review-fixes.test.ts` "R01" tests: the reproduction format (Hook size 48, width 20) now creates, renders, approves and re-saves on both aspects with all layers inside the canvas; `fitText` on 120 words at size 48 returns in-bounds geometry with no render problem. Creation also validates the finished post against `postSchema` (422 with an actionable message otherwise).
 
 **Locations:** `src/lib/photo-layout.ts:279` (`fitText`), `src/lib/format-template.ts:91`, `src/app/api/studio/route.ts:438` and `:451`.
 
@@ -64,7 +64,7 @@ Local verification used Node v24.21.0; CI specifies Node 22. Runtime reproductio
 
 #### R02 — High: Stale clients export or publish a different revision
 
-- [ ] Fixed and verified.
+- [x] Fixed and verified in `61d9a62`. "R02" test: after revision 2 is approved, export `?revision=1` and publish/correct with `revision: 1` return 409 and leave the post unpublished; matching requests succeed. Browser check: the editor downloads with `?revision=<shown>` and a stale download/publish shows the conflict message.
 
 **Locations:** `src/app/api/export/[id]/route.ts:15`, `src/app/api/studio/route.ts:480`, `src/components/slideshow-editor.tsx:484` and `:1924`.
 
@@ -80,7 +80,7 @@ Export and publication recording identify a post by ID and use its latest approv
 
 #### R03 — High: Concurrent brand and format saves lose newer changes
 
-- [ ] Fixed and verified.
+- [x] Fixed and verified in `61d9a62`. "R03" test: stale brand and format saves return 409 and keep window A's facts/hooks; unversioned updates conflict; fresh saves succeed. Browser check: brand and format saves advance `version`, and a stale save shows "changed in another window".
 
 **Locations:** `src/app/api/studio/route.ts:248` and `:256`, `src/lib/store.ts:62`.
 
@@ -94,7 +94,7 @@ Brand and format updates replace complete records without version checks. Post s
 
 #### R04 — Medium: Website DNS validation does not bind the actual connection
 
-- [ ] Fixed and verified.
+- [x] Fixed and verified in `61d9a62`. "R04" test: `pinnedLookup` answers only validated addresses; `pinnedTransport` to an unresolvable `.example` host reaches the pinned local listener (so DNS was never consulted); each redirect hop receives its own validated addresses. Live smoke test: https://example.com reads correctly and a certificate/name mismatch is rejected.
 
 **Locations:** `src/lib/website.ts:82`, `:134`, and `:140`.
 
@@ -108,7 +108,7 @@ The code checks DNS answers for public addresses, discards those answers, then p
 
 #### R05 — Medium: Horizontal glyph overflow is not rejected
 
-- [ ] Fixed and verified.
+- [x] Fixed and verified in `61d9a62`. "R05" test: the `W` reproduction reports overflow and `renderPhotoSlide` returns 422; ink drawn above the canvas is rejected; ordinary wrapping passes.
 
 **Locations:** `src/lib/photo-layout.ts:94` and `:132`, `src/lib/photo-render.ts:105`.
 
@@ -122,7 +122,7 @@ Long-word splitting still accepts an individual character wider than the availab
 
 #### R06 — Medium: Unsupported glyphs silently render substitute shapes
 
-- [ ] Fixed and verified.
+- [x] Fixed and verified in `61d9a62`. "R06" test: emoji and CJK copy is reported ("The font can’t draw …") and rendering returns 422; zero-width and variation-selector characters are dropped; supported punctuation and accents pass.
 
 **Location:** `src/lib/photo-layout.ts:121`.
 
@@ -136,7 +136,7 @@ The bundled font is used to draw every character without a font-coverage check. 
 
 #### R07 — Medium: Hidden image references allow blank-slide approval
 
-- [ ] Fixed and verified.
+- [x] Fixed and verified in `61d9a62`. "R07" test: hidden references (grid `none`, or beyond a `split` grid) cannot approve a blank slide; a visible image-only slide approves. The editor now trims slot references when the grid shrinks.
 
 **Locations:** `src/lib/store.ts:194`, `src/lib/format-template.ts:129` and `:135`, `src/components/slideshow-editor.tsx:1515`.
 
@@ -150,7 +150,7 @@ Approval treats all stored asset IDs as visible content, but `imageSlots` render
 
 #### R08 — Medium: Photo drafts ignore format color defaults without role templates
 
-- [ ] Fixed and verified.
+- [x] Fixed and verified in `61d9a62`. "R08" test: a template-less format with `#ff0000`/`#000000` creates slides with those colors, matching the preview; the preset keeps black/white.
 
 **Locations:** `src/lib/photo-layout.ts:302`, `src/app/api/studio/route.ts:438`, `src/components/format-dashboard.tsx:409`.
 
@@ -164,7 +164,7 @@ When a photo format has no explicit role templates, draft creation uses `photoSl
 
 #### R09 — Medium: Format previews select removed images
 
-- [ ] Fixed and verified.
+- [x] Fixed and verified in `61d9a62`. "R09" test: `templateSlide` skips a removed asset ahead of an active one.
 
 **Locations:** `src/components/format-dashboard.tsx:409`, `src/lib/format-template.ts:82`, `src/app/api/studio/route.ts:402`.
 
@@ -180,7 +180,7 @@ The dashboard passes all `state.assets` to `templateSlide`, including removed as
 
 #### R10 — Medium: Large components duplicate request and dialog responsibilities
 
-- [ ] Fixed and verified.
+- [x] Fixed and verified in `7dc94af`. Shared `request.ts`/`dialog.ts`; `studio.tsx` 2,235 → ~550 lines with views and dialogs in their own files; the editor's controls and action sheets are extracted. Browser check (production build): modal focus, Tab wrap, Escape and focus restoration; dropdown Escape closes only the menu; editor unsaved-changes sheet and focus trap; format dashboard scroll lock, close confirmation and its focus trap; upload, approve, download and publish flows.
 
 **Locations:** `src/components/studio.tsx:89`, `:168`, and `:843`; `src/components/slideshow-editor.tsx:59` and `:179`; `src/components/format-dashboard.tsx:137`.
 
@@ -194,7 +194,7 @@ The dashboard passes all `state.assets` to `templateSlide`, including removed as
 
 #### R11 — Low: Obsolete editor and landing-page CSS remains loaded
 
-- [ ] Fixed and verified.
+- [x] Fixed and verified in `34faaed`. A selector scan of all `.ts`/`.tsx` sources (accounting for the `fd-page-`/`photo-panel-`/variant-built classes) shows no remaining unused selectors; `.draft-canvas`, `.draft-copy` and `.legacy-slide` are kept. About 800 lines removed.
 
 **Locations:** `src/app/globals.css:481` and `:1691`, `src/app/format-dashboard.css:863`.
 
@@ -208,7 +208,7 @@ Old landing-page and editor selectors, including `.hero-card`, `.editor-overlay`
 
 #### R12 — Low: Unexpected server errors discard diagnostic information
 
-- [ ] Fixed and verified.
+- [x] Fixed and verified in `61d9a62`. "R12" test: a corrupt image produces a 500 with the unchanged generic body, while the log carries the operation, post/revision/slide, message, stack and a reference; secrets such as `sk-…` keys are redacted.
 
 **Locations:** `src/app/api/studio/route.ts:538`, `src/app/api/export/[id]/route.ts:80`, `src/app/api/render/[post]/[revision]/[slide]/route.ts:31`.
 
@@ -217,6 +217,10 @@ Unexpected failures log only the exception name, often just `Error`. This makes 
 **Suggested cleanup:** Retain useful structured server diagnostics or a sanitized stack/error code and operation context. Continue redacting secrets and keep server paths and internals out of HTTP error bodies.
 
 **Acceptance:** A representative unexpected failure can be diagnosed from server logs without exposing sensitive values or changing sanitized client responses.
+
+### Fix verification — 2026-10-12
+
+All twelve findings are fixed on branch `worktree-code-review-fixes`. Final checks: `npm run typecheck`, `npm run lint`, `npm test` (61 tests, including 11 new ones in `tests/review-fixes.test.ts`), `npm run build`, and the Prettier check all pass. API callers must now send `expected` for brand/format updates, `revision` for publication, and `?revision=` for exports.
 
 ### Dependencies
 
