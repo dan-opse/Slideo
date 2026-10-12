@@ -289,6 +289,16 @@
   border-color: #ffcbcb;
   color: #dd1117;
 }
+/* Approval is final for this revision: shown as a state, not dimmed. */
+.photo-action.approved,
+.photo-action.approved:disabled {
+  background: #e9f7ee;
+  border-color: #9fd8b2;
+  color: #157a3d;
+  box-shadow: none;
+  opacity: 1;
+  cursor: default;
+}
 .photo-editor-header .photo-action {
   border-radius: 8px;
   min-height: 29px;
@@ -590,12 +600,15 @@
   background: #fff;
   color: #121212;
 }
+/* One fixed height on every tab, so switching tabs or slides never resizes
+   the canvas above; longer panels scroll inside. */
 .photo-dock {
   background: #fff;
   border-radius: 13px;
   padding: 12px;
-  max-height: 260px;
+  height: 260px;
   overflow-y: auto;
+  align-content: start;
 }
 .photo-control {
   display: flex;
@@ -609,7 +622,7 @@
   font-weight: 500;
   white-space: nowrap;
 }
-.photo-control input,
+.photo-control input:not(.slider),
 .photo-control textarea {
   border: 1px solid #e6e6e6;
   padding: 7px 10px;
@@ -625,6 +638,10 @@
   border-color: transparent;
   padding: 7px 8px;
   font-variant-numeric: tabular-nums;
+}
+/* Sit sliders on the same line as the 36px fields beside them. */
+.photo-control > input.slider[type="range"] {
+  margin-block: 8px;
 }
 .photo-control textarea {
   height: auto;
@@ -726,6 +743,57 @@
   display: flex;
   align-items: center;
   gap: 3px;
+}
+/* Lock onto grid: a small switch, like the format customize toggles. */
+.photo-toggle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #5b5b5b;
+  cursor: pointer;
+}
+.photo-toggle input {
+  position: absolute;
+  left: 0;
+  width: 28px;
+  height: 16px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.photo-toggle i {
+  width: 28px;
+  height: 16px;
+  padding: 2px;
+  border-radius: 10px;
+  background: #dfdfdf;
+  pointer-events: none;
+}
+.photo-toggle i:before {
+  content: "";
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px #0002;
+  transition: transform 0.15s;
+}
+.photo-toggle input:checked + i {
+  background: #0a0a0a;
+}
+.photo-toggle input:checked + i:before {
+  transform: translateX(12px);
+}
+.photo-toggle input:focus-visible + i {
+  outline: 2px solid #409aff;
+  outline-offset: 2px;
+}
+.photo-toggle:has(input:disabled) {
+  opacity: 0.4;
+  cursor: default;
 }
 .photo-slide-actions {
   position: absolute;
@@ -908,7 +976,6 @@
   }
   .photo-dock.text {
     grid-template-columns: 1fr;
-    max-height: 270px;
   }
   .photo-text-edit {
     grid-row: auto;
@@ -980,7 +1047,7 @@
   .photo-text-top {
     grid-template-columns: 1fr 54px 1fr 1fr;
   }
-  .photo-control input {
+  .photo-control input:not(.slider) {
     font-size: 11px;
     padding-inline: 6px;
   }

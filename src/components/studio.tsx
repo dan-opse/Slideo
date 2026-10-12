@@ -22,6 +22,7 @@ import {
   Clock3,
   Download,
   FileText,
+  Folder,
   FolderOpen,
   ImagePlus,
   Layers3,
@@ -33,6 +34,7 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  Trash2,
   Upload,
   X,
   AlertCircle,
@@ -288,7 +290,6 @@ function CreateSlideshowModal({
   const [slideCount, setSlideCount] = useState(
     clampCount(firstFormat?.slideCount || 6),
   );
-  const [collection, setCollection] = useState("");
   const [mode, setMode] = useState<"manual" | "ai">(
     state.settings.aiReady ? "ai" : "manual",
   );
@@ -327,7 +328,6 @@ function CreateSlideshowModal({
       title="Plant a new idea."
       subtitle="Choose your brief and format. Make it your own."
       onClose={onClose}
-      wide={ideasOpen}
       error={error}
     >
       <form
@@ -337,7 +337,6 @@ function CreateSlideshowModal({
             brandId,
             formatId,
             topic,
-            collection,
             mode,
             slideCount,
             selectedHook: selectedHook || undefined,
@@ -499,6 +498,26 @@ function CreateSlideshowModal({
               }}
             />
           </Field>
+          <Field
+            label="Number of slides"
+            hint={
+              structured
+                ? undefined
+                : "Changing the format resets this to its default."
+            }
+          >
+            <input
+              type="number"
+              min={2}
+              max={10}
+              step={1}
+              required
+              disabled={!!structured}
+              value={count}
+              onChange={(event) => setSlideCount(Number(event.target.value))}
+              onBlur={() => setSlideCount(clampCount(slideCount))}
+            />
+          </Field>
         </div>
         {!!state.formats.find((format) => format.id === formatId)?.hooks
           ?.length && (
@@ -523,39 +542,6 @@ function CreateSlideshowModal({
             />
           </Field>
         )}
-        <div className="form-row">
-          {!structured && (
-            <Field
-              label="Number of slides"
-              hint="Changing the format resets this to its default."
-            >
-              <input
-                type="number"
-                min={2}
-                max={10}
-                step={1}
-                required
-                value={slideCount}
-                onChange={(event) => setSlideCount(Number(event.target.value))}
-                onBlur={() => setSlideCount(clampCount(slideCount))}
-              />
-            </Field>
-          )}
-          <Field label="Background collection">
-            <Dropdown
-              label="Background collection"
-              value={collection}
-              items={[
-                { value: "", label: "Use the format’s image settings" },
-                ...collectionsOf(state.assets).map((name) => ({
-                  value: name,
-                  label: name,
-                })),
-              ]}
-              onChange={setCollection}
-            />
-          </Field>
-        </div>
         <p className="slide-count-note">
           <Layers3 size={15} />
           This slideshow will contain <strong>{count} slides</strong>
@@ -647,6 +633,213 @@ function SlideImage({
     </div>
   );
 }
+type AssetDeletion = { ids: string[]; title: string; detail: string };
+
+const listNames = (all: string[]) => {
+  const names = all.slice(0, 3);
+  const more = all.length - names.length;
+  if (more) return `${names.join(", ")} and ${more} more`;
+  return names.length > 1
+    ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`
+    : names[0];
+};
+function deletionMessage({
+  deleted,
+  kept,
+}: {
+  deleted: Asset[];
+  kept: Asset[];
+}) {
+  const done = deleted.length
+    ? `Deleted ${plural(deleted.length, "image")}.`
+    : "";
+  if (!kept.length) return done;
+  const one = kept.length === 1;
+  return `${done} Kept ${listNames(kept.map((asset) => asset.name))}: ${one ? "a slideshow uses it" : "slideshows use them"}, so ${one ? "it stays" : "they stay"} with ${one ? "that slideshow" : "those slideshows"} and ${one ? "leaves" : "leave"} your library.`.trim();
+}
+
+function AssetLibrary({
+  library,
+  onEdit,
+  onDelete,
+}: {
+  library: Asset[];
+  onEdit: (asset: Asset) => void;
+  onDelete: (request: AssetDeletion) => void;
+}) {
+  const [folder, setFolder] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const folders = collectionsOf(library).map((name) => ({
+    name,
+    images: library.filter((asset) => asset.collection === name),
+  }));
+  // A folder emptied by a delete or a rename falls back to the folder list.
+  const open = folders.find((item) => item.name === folder);
+  const keys = open
+    ? open.images.map((asset) => asset.id)
+    : folders.map((item) => item.name);
+  // Deleted items drop out of the selection because they are no longer shown.
+  const selected = keys.filter((key) => picked.has(key));
+  const go = (name: string | null) => {
+    setFolder(name);
+    setPicked(new Set());
+  };
+  const toggle = (key: string) =>
+    setPicked((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const remove = () => {
+    if (open) {
+      onDelete({
+        ids: selected,
+        title: `Delete ${plural(selected.length, "image")}?`,
+        detail: `This deletes ${selected.length === 1 ? "this image" : `these ${selected.length} images`} from ${open.name}.`,
+      });
+      return;
+    }
+    const chosen = folders.filter((item) => picked.has(item.name));
+    const images = chosen.flatMap((item) => item.images);
+    onDelete({
+      ids: images.map((asset) => asset.id),
+      title: `Delete ${plural(chosen.length, "folder")}?`,
+      detail: `This deletes ${chosen.length === 1 ? "the folder" : "the folders"} ${listNames(chosen.map((item) => item.name))}, along with the ${plural(images.length, "image")} ${chosen.length === 1 ? "in it" : "in them"}.`,
+    });
+  };
+  const check = (key: string, label: string) => (
+    <label className="asset-check" title={label}>
+      <input
+        type="checkbox"
+        aria-label={label}
+        checked={picked.has(key)}
+        onChange={() => toggle(key)}
+      />
+    </label>
+  );
+  return (
+    <>
+      <div className="section-heading asset-heading">
+        {open ? (
+          <div className="asset-folder-title">
+            <button className="text-button" onClick={() => go(null)}>
+              <ChevronLeft size={15} /> All folders
+            </button>
+            <h2>
+              {open.name} <span>· {plural(open.images.length, "image")}</span>
+            </h2>
+          </div>
+        ) : (
+          <h2>
+            {plural(folders.length, "folder")}{" "}
+            <span>· {plural(library.length, "image")}</span>
+          </h2>
+        )}
+        <div className="asset-toolbar">
+          {selected.length ? (
+            <>
+              <span>{selected.length} selected</span>
+              <button
+                className="text-button"
+                onClick={() => setPicked(new Set())}
+              >
+                Clear
+              </button>
+              <button className="button secondary" onClick={remove}>
+                <Trash2 size={15} />
+                Delete
+              </button>
+            </>
+          ) : (
+            <button
+              className="text-button"
+              onClick={() => setPicked(new Set(keys))}
+            >
+              Select all
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="asset-grid">
+        {open
+          ? open.images.map((a) => (
+              <article
+                key={a.id}
+                className={`asset-card ${picked.has(a.id) ? "selected" : ""}`}
+              >
+                <div className="asset-image">
+                  <Image
+                    unoptimized
+                    fill
+                    sizes="300px"
+                    src={`/api/media/${a.id}`}
+                    alt={a.name}
+                    style={{ objectFit: "cover" }}
+                  />
+                  {check(a.id, `Select ${a.name}`)}
+                </div>
+                <div>
+                  <strong>{a.name}</strong>
+                  <small>
+                    {a.collection} · {a.width} × {a.height}
+                  </small>
+                  <span className={a.rights ? "rights" : "rights missing"}>
+                    {a.rights ? <Check size={13} /> : <AlertCircle size={13} />}{" "}
+                    {a.rights || "Rights not recorded: add them to approve"}
+                  </span>
+                  <button
+                    className="text-button asset-edit"
+                    aria-label={`Edit ${a.name}`}
+                    onClick={() => onEdit(a)}
+                  >
+                    <Pencil size={13} /> Edit details
+                  </button>
+                </div>
+              </article>
+            ))
+          : folders.map(({ name, images }) => (
+              <article
+                key={name}
+                className={`asset-card asset-folder ${picked.has(name) ? "selected" : ""}`}
+              >
+                <button
+                  className="asset-folder-open"
+                  aria-label={`Open ${name}, ${plural(images.length, "image")}`}
+                  onClick={() => go(name)}
+                >
+                  <span
+                    className="asset-image asset-folder-cover"
+                    data-count={Math.min(images.length, 4)}
+                  >
+                    {images.slice(0, 4).map((a) => (
+                      <span key={a.id}>
+                        <Image
+                          unoptimized
+                          fill
+                          sizes="150px"
+                          src={`/api/media/${a.id}`}
+                          alt=""
+                          style={{ objectFit: "cover" }}
+                        />
+                      </span>
+                    ))}
+                  </span>
+                  <span className="asset-folder-info">
+                    <strong>
+                      <Folder size={13} /> <span>{name}</span>
+                    </strong>
+                    <small>{plural(images.length, "image")}</small>
+                  </span>
+                </button>
+                {check(name, `Select folder ${name}`)}
+              </article>
+            ))}
+      </div>
+    </>
+  );
+}
+
 export default function Studio() {
   const [state, setState] = useState<StudioState | null>(null),
     [view, setView] = useState<View>("Overview"),
@@ -667,7 +860,8 @@ export default function Studio() {
     [formatEdit, setFormatEdit] = useState<Format | null>(null),
     [upload, setUpload] = useState(false),
     [uploadFiles, setUploadFiles] = useState<File[]>([]),
-    [assetEdit, setAssetEdit] = useState<Asset | null>(null);
+    [assetEdit, setAssetEdit] = useState<Asset | null>(null),
+    [assetDelete, setAssetDelete] = useState<AssetDeletion | null>(null);
   const refresh = useCallback(async () => {
     const r = await fetch("/api/studio");
     const data = await r.json();
@@ -730,7 +924,8 @@ export default function Studio() {
       `${p.title} ${p.topic}`.toLowerCase().includes(search.toLowerCase()),
   );
   // Errors from a form are shown inside its dialog, not behind the backdrop.
-  const pageModalOpen = create || !!brandEdit || upload || !!assetEdit;
+  const pageModalOpen =
+    create || !!brandEdit || upload || !!assetEdit || !!assetDelete;
   const navigate = (v: View) => {
     setView(v);
     setFilter("all");
@@ -1084,59 +1279,17 @@ export default function Studio() {
           )}
           {view === "Assets" &&
             (library.length ? (
-              <>
-                <div className="section-heading">
-                  <h2>
-                    {plural(library.length, "image")}{" "}
-                    <span>
-                      · {plural(collectionsOf(library).length, "collection")}
-                    </span>
-                  </h2>
-                </div>
-                <div className="asset-grid">
-                  {library.map((a) => (
-                    <article key={a.id} className="asset-card">
-                      <div className="asset-image">
-                        <Image
-                          unoptimized
-                          fill
-                          sizes="300px"
-                          src={`/api/media/${a.id}`}
-                          alt={a.name}
-                          style={{ objectFit: "cover" }}
-                        />
-                      </div>
-                      <div>
-                        <strong>{a.name}</strong>
-                        <small>
-                          {a.collection} · {a.width} × {a.height}
-                        </small>
-                        <span
-                          className={a.rights ? "rights" : "rights missing"}
-                        >
-                          {a.rights ? (
-                            <Check size={13} />
-                          ) : (
-                            <AlertCircle size={13} />
-                          )}{" "}
-                          {a.rights ||
-                            "Rights not recorded: add them to approve"}
-                        </span>
-                        <button
-                          className="text-button asset-edit"
-                          aria-label={`Edit ${a.name}`}
-                          onClick={() => {
-                            setError("");
-                            setAssetEdit(a);
-                          }}
-                        >
-                          <Pencil size={13} /> Edit details
-                        </button>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </>
+              <AssetLibrary
+                library={library}
+                onEdit={(asset) => {
+                  setError("");
+                  setAssetEdit(asset);
+                }}
+                onDelete={(request) => {
+                  setError("");
+                  setAssetDelete(request);
+                }}
+              />
             ) : (
               <div className="empty-state">
                 <ImagePlus size={42} strokeWidth={1} />
@@ -1513,6 +1666,55 @@ export default function Studio() {
             })
           }
         />
+      )}
+      {assetDelete && (
+        <Modal
+          title={assetDelete.title}
+          onClose={() => {
+            setAssetDelete(null);
+            setError("");
+          }}
+          error={error}
+        >
+          <p>
+            {assetDelete.detail} Images that a slideshow uses can’t be deleted:
+            those slideshows keep them, and they leave your library.
+          </p>
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="button secondary"
+              disabled={busy}
+              onClick={() => {
+                setAssetDelete(null);
+                setError("");
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="button danger"
+              disabled={busy}
+              onClick={() =>
+                run(async () => {
+                  const result = (await api("removeAssets", {
+                    ids: assetDelete.ids,
+                  })) as { deleted: Asset[]; kept: Asset[] };
+                  setAssetDelete(null);
+                  setToast(deletionMessage(result));
+                })
+              }
+            >
+              {busy ? (
+                <Loader2 className="spin" size={16} />
+              ) : (
+                <Trash2 size={16} />
+              )}
+              Delete
+            </button>
+          </div>
+        </Modal>
       )}
       {editing && (
         <SlideshowEditor

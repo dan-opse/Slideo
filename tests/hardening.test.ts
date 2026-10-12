@@ -339,6 +339,34 @@ test("assets can be edited; removal keeps files that revisions use", async () =>
   assert.equal(fresh.slides[0].assetId, null, "removed images are not reused");
 });
 
+test("bulk asset removal deletes unused images and keeps used ones", async () => {
+  const used = (
+    await upload(await jpeg("#2266aa"), { collection: "Bulk", rights: "Mine" })
+  ).body.asset as Asset;
+  await photoPost("Bulk");
+  const spare = (
+    await upload(await jpeg("#aa6622"), { collection: "Bulk", rights: "Mine" })
+  ).body.asset as Asset;
+  const result = await action({
+    action: "removeAssets",
+    ids: [used.id, spare.id],
+  });
+  assert.equal(result.status, 200);
+  assert.deepEqual(
+    result.body.deleted.map((a: Asset) => a.id),
+    [spare.id],
+  );
+  assert.deepEqual(
+    result.body.kept.map((a: Asset) => a.id),
+    [used.id],
+  );
+  assert.ok(store.get<Asset>("asset", used.id).removedAt);
+  assert.ok(existsSync(path.join(folder, "assets", `${used.id}.jpg`)));
+  assert.ok(!existsSync(path.join(folder, "assets", `${spare.id}.jpg`)));
+  const empty = await action({ action: "removeAssets", ids: [] });
+  assert.equal(empty.status, 400);
+});
+
 test("render errors use accurate status codes and never expose server paths", async () => {
   const asset = (
     await upload(await jpeg("#993311"), { collection: "Gone", rights: "Mine" })

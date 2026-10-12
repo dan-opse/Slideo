@@ -65,6 +65,7 @@ const ACTIONS = new Set([
   "format",
   "asset",
   "removeAsset",
+  "removeAssets",
   "hooks",
   "ideas",
   "save",
@@ -201,6 +202,35 @@ async function upload(req: NextRequest) {
   return { asset, duplicate: false };
 }
 
+// Revisions are immutable, so an image a revision uses is only taken out of
+// the library; its file stays for the slideshows that use it.
+async function removeAssets(ids: string[]) {
+  const results = transaction(() =>
+    ids.map((id) => {
+      const asset = get<Asset>("asset", id);
+      if (assetInUse(id)) {
+        const item = { ...asset, removedAt: now() };
+        put("asset", item);
+        audit("asset.removed", id);
+        return { asset: item, kept: true };
+      }
+      remove("asset", id);
+      audit("asset.deleted", id);
+      return { asset, kept: false };
+    }),
+  );
+  await Promise.all(
+    results
+      .filter((r) => !r.kept)
+      .map((r) =>
+        unlink(path.join(dataDir, "assets", `${r.asset.id}.jpg`)).catch(
+          () => {},
+        ),
+      ),
+  );
+  return results;
+}
+
 export async function GET(req: NextRequest) {
   const denied = guard(req);
   if (denied) return denied;
@@ -246,18 +276,20 @@ export async function POST(req: NextRequest) {
     }
     if (action === "removeAsset") {
       const id = z.string().parse(input.id);
-      const asset = get<Asset>("asset", id);
-      if (assetInUse(id)) {
-        // Revisions are immutable, so keep the file for slideshows that use it.
-        const item = { ...asset, removedAt: now() };
-        put("asset", item);
-        audit("asset.removed", id);
-        return NextResponse.json({ asset: item, kept: true });
-      }
-      remove("asset", id);
-      await unlink(path.join(dataDir, "assets", `${id}.jpg`)).catch(() => {});
-      audit("asset.deleted", id);
-      return NextResponse.json({ asset, kept: false });
+      const [result] = await removeAssets([id]);
+      return NextResponse.json(result);
+    }
+    if (action === "removeAssets") {
+      const ids = z
+        .array(z.string(), { error: "Choose the images to delete." })
+        .min(1, { error: "Choose the images to delete." })
+        .max(5000)
+        .parse(input.ids);
+      const results = await removeAssets([...new Set(ids)]);
+      return NextResponse.json({
+        deleted: results.filter((r) => !r.kept).map((r) => r.asset),
+        kept: results.filter((r) => r.kept).map((r) => r.asset),
+      });
     }
     if (action === "hooks") {
       const args = z
