@@ -57,6 +57,7 @@ import { PhotoCanvas, usePhotoFonts } from "./photo-canvas";
 import { NumberInput } from "./number-input";
 import { arrowStep } from "./keys";
 import { RenderFallback } from "./render-fallback";
+import { ColorPicker } from "./ui/color-picker";
 import { Dropdown } from "./ui/dropdown";
 import { Slider } from "./ui/slider";
 import { ScrollRail } from "./ui/scroll-rail";
@@ -118,24 +119,6 @@ function Toggle({
 }
 const styleLabel = (style: RoleTemplate["style"]) =>
   style === "box" ? "Background" : style === "shadow" ? "Shadow" : "Outline";
-function ColorInput({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <span className="fd-color">
-      <input
-        type="color"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-      <code>{value.toUpperCase()}</code>
-    </span>
-  );
-}
 function normalize(format: Format, state: StudioState): Format {
   const brandId = defaultBrandId(state, format);
   return {
@@ -917,12 +900,11 @@ export default function FormatDashboard({
                     ["accent", "Accent"],
                   ].map(([key, label]) => (
                     <Field key={key} label={label}>
-                      <input
-                        type="color"
+                      <ColorPicker
+                        variant="field"
+                        label={label}
                         value={draft[key as "color" | "ink" | "accent"]}
-                        onChange={(event) =>
-                          patch({ [key]: event.target.value })
-                        }
+                        onChange={(value) => patch({ [key]: value })}
                       />
                     </Field>
                   ))}
@@ -1292,7 +1274,9 @@ export default function FormatDashboard({
                         />
                       </Field>
                       <Field label="Text color">
-                        <ColorInput
+                        <ColorPicker
+                          variant="field"
+                          label="Text color"
                           value={template.color}
                           onChange={(color) => patchTemplate({ color })}
                         />
@@ -1316,7 +1300,9 @@ export default function FormatDashboard({
                         <span aria-hidden="true" />
                       ) : (
                         <Field label={`${styleLabel(template.style)} color`}>
-                          <ColorInput
+                          <ColorPicker
+                            variant="field"
+                            label={`${styleLabel(template.style)} color`}
                             value={template.styleColor ?? "#000000"}
                             onChange={(styleColor) => {
                               const next = recolorStyle(template, styleColor);

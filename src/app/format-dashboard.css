@@ -422,44 +422,9 @@
   min-width: 0;
 }
 /* One height for every single-line control, so rows line up. */
-.fd-field input:not([type="range"], [type="color"]),
-.fd-color,
+.fd-field input:not([type="range"]),
 .fd-range {
   height: 38px;
-}
-.fd-color {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  border: 1px solid #e3e3e3;
-  border-radius: 9px;
-  background: #fff;
-  padding: 0 10px 0 6px;
-  min-width: 0;
-}
-.fd-field .fd-color input[type="color"] {
-  width: 26px;
-  height: 26px;
-  flex: none;
-  padding: 0;
-  border: 1px solid #e3e3e3;
-  border-radius: 6px;
-  background: none;
-  cursor: pointer;
-}
-.fd-color input[type="color"]::-webkit-color-swatch-wrapper {
-  padding: 0;
-}
-.fd-color input[type="color"]::-webkit-color-swatch {
-  border: 0;
-  border-radius: 5px;
-}
-.fd-color code {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: #3d3d3d;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .fd-range {
   display: flex;
@@ -468,10 +433,6 @@
 .fd-field textarea {
   line-height: 1.7;
   resize: vertical;
-}
-.fd-field input[type="color"] {
-  height: 39px;
-  padding: 5px;
 }
 .fd-field small,
 .fd-help {

@@ -168,21 +168,301 @@
   color: var(--control-muted);
 }
 
+/* Color picker (components/ui): a swatch or field trigger and a portal
+   panel styled like the dropdown menu. */
+.color-swatch,
+.color-field {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  cursor: pointer;
+}
+.color-swatch:disabled,
+.color-field:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.color-chip {
+  display: block;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgb(28 25 23 / 0.14);
+}
+.color-swatch {
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  transition:
+    background-color 0.15s,
+    box-shadow 0.15s;
+}
+.color-swatch:hover:not(:disabled),
+.color-swatch.is-open {
+  background: var(--control-highlight);
+}
+.color-swatch.is-open {
+  box-shadow: var(--control-shadow-pressed);
+}
+.color-swatch:focus-visible {
+  border-color: var(--control-border-focus);
+  outline: none;
+}
+.color-field {
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  height: var(--dropdown-h, 36px);
+  padding: 0 12px 0 7px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--dropdown-radius, 9px);
+  background: #fff;
+  color: var(--control-text);
+  text-align: left;
+  box-shadow: var(--control-shadow);
+  transition:
+    box-shadow 0.15s,
+    border-color 0.15s;
+}
+.color-field:hover:not(:disabled, .is-open) {
+  border-color: var(--control-border-hover);
+  box-shadow: var(--control-shadow-hover);
+}
+.color-field:focus-visible:not(.is-open) {
+  border-color: var(--control-border-focus);
+  box-shadow: var(--control-shadow-focus);
+  outline: none;
+}
+.color-field.is-open {
+  box-shadow: var(--control-shadow-pressed);
+}
+.color-field code {
+  overflow: hidden;
+  padding: 0;
+  background: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+}
+
+.color-picker {
+  position: fixed;
+  z-index: 999;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--control-border);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: var(--menu-shadow);
+  color: var(--control-text);
+  font: 12px/1.4 var(--sans);
+  --dropdown-h: 30px;
+  --dropdown-font: 11px;
+  --dropdown-radius: 7px;
+}
+.color-picker-area {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border-radius: 7px;
+  background:
+    linear-gradient(to top, #000, transparent),
+    linear-gradient(to right, #fff, hsl(var(--hue) 100% 50%));
+  box-shadow: inset 0 0 0 1px rgb(28 25 23 / 0.08);
+  cursor: crosshair;
+  touch-action: none;
+  outline: none;
+}
+.color-picker-area:focus-visible {
+  box-shadow:
+    inset 0 0 0 1px rgb(28 25 23 / 0.08),
+    0 0 0 2px #fff,
+    0 0 0 3px var(--control-border-focus);
+}
+.color-picker-thumb {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.35),
+    0 1px 3px rgb(0 0 0 / 0.3);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.color-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.color-picker-dropper {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--control-muted);
+  box-shadow: var(--control-shadow);
+  cursor: pointer;
+  transition:
+    box-shadow 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+.color-picker-dropper:hover {
+  border-color: var(--control-border-hover);
+  color: var(--control-text);
+  box-shadow: var(--control-shadow-hover);
+}
+.color-picker-dropper:active {
+  box-shadow: var(--control-shadow-pressed);
+}
+.color-picker-dropper:focus-visible {
+  border-color: var(--control-border-focus);
+  outline: none;
+}
+input.color-picker-hue[type="range"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 1;
+  min-width: 0;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    #f00,
+    #ff0,
+    #0f0,
+    #0ff,
+    #00f,
+    #f0f,
+    #f00
+  );
+  box-shadow: inset 0 0 0 1px rgb(28 25 23 / 0.08);
+  cursor: pointer;
+}
+input.color-picker-hue[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.35),
+    0 1px 3px rgb(0 0 0 / 0.3);
+}
+input.color-picker-hue[type="range"]::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.35),
+    0 1px 3px rgb(0 0 0 / 0.3);
+}
+input.color-picker-hue[type="range"]:focus-visible {
+  outline: 2px solid var(--control-border-focus);
+  outline-offset: 2px;
+}
+.color-picker-mode {
+  flex-shrink: 0;
+  width: 72px;
+}
+.color-picker-mode .dropdown-trigger {
+  padding: 0 8px;
+  gap: 4px;
+}
+.color-picker-fields {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+.color-picker-fields input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--control-border);
+  border-radius: 0;
+  background: var(--control-highlight);
+  color: var(--control-text);
+  font: 11px var(--mono);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.color-picker-fields input + input {
+  margin-left: -1px;
+}
+.color-picker-fields input:first-of-type {
+  border-radius: 7px 0 0 7px;
+}
+.color-picker-fields input:last-of-type {
+  border-radius: 0 7px 7px 0;
+}
+.color-picker-fields input:only-of-type {
+  border-radius: 7px;
+}
+.color-picker-fields input:focus {
+  position: relative;
+  border-color: var(--control-border-focus);
+  background: #fff;
+  outline: none;
+}
+.color-picker-hash {
+  position: absolute;
+  top: 50%;
+  left: 9px;
+  z-index: 1;
+  color: var(--control-muted);
+  font: 11px var(--mono);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+input.color-picker-hex {
+  padding-left: 20px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
 /* Each form keeps its own control height so dropdowns line up with the
    inputs beside them. */
-.field .dropdown {
+.field .dropdown,
+.field .color-field {
   --dropdown-h: 39px;
   --dropdown-font: 12px;
 }
-.inspector .field .dropdown {
+.inspector .field .dropdown,
+.inspector .field .color-field {
   --dropdown-h: 34px;
   --dropdown-font: 11px;
 }
-.fd-field .dropdown {
+.fd-field .dropdown,
+.fd-field .color-field {
   --dropdown-h: 38px;
   --dropdown-font: 12px;
 }
-.photo-control .dropdown {
+.photo-control .dropdown,
+.photo-control .color-field {
   --dropdown-radius: 12px;
 }
 .photo-color .dropdown {

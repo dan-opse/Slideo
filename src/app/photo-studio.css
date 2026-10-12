@@ -633,10 +633,6 @@
   font-size: 12px;
   line-height: 1.5;
 }
-.photo-control input[type="color"] {
-  padding: 4px;
-  cursor: pointer;
-}
 .photo-dock.text {
   display: grid;
   grid-template-columns: 210px minmax(0, 1fr);
@@ -690,13 +686,8 @@
   align-items: center;
   overflow: hidden;
 }
-.photo-color input {
-  width: 26px;
-  height: 26px !important;
-  padding: 3px !important;
-  margin-left: 5px;
-  border: 0;
-  border-radius: 0;
+.photo-color .color-swatch {
+  margin-left: 3px;
 }
 .photo-layer-nav {
   display: flex;
