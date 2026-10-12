@@ -10,6 +10,33 @@
   --sans: "Geist Sans", system-ui, sans-serif;
   --display: "Geist Sans", system-ui, sans-serif;
   --mono: "Geist Mono", ui-monospace, monospace;
+  /* Controls (dropdown, buttons, sliders, scrollbars): app/controls.css */
+  --control-border: #e7e5e4;
+  --control-border-hover: #d6d3d1;
+  --control-border-focus: #a8a29e;
+  --control-text: #44403c;
+  --control-muted: #78716c;
+  --control-highlight: #f5f5f4;
+  --control-shadow:
+    0 1px 2px rgb(28 25 23 / 0.06), 0 4px 10px -8px rgb(28 25 23 / 0.45);
+  --control-shadow-hover:
+    0 1px 2px rgb(28 25 23 / 0.06), 0 8px 18px -12px rgb(28 25 23 / 0.5);
+  --control-shadow-focus:
+    0 1px 2px rgb(28 25 23 / 0.08), 0 10px 22px -12px rgb(28 25 23 / 0.55);
+  --control-shadow-pressed: inset 0 1px 2px rgb(28 25 23 / 0.09);
+  --solid-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.1), 0 1px 2px rgb(28 25 23 / 0.2),
+    0 4px 10px -6px rgb(28 25 23 / 0.6);
+  --solid-shadow-hover:
+    inset 0 1px 0 rgb(255 255 255 / 0.1), 0 1px 2px rgb(28 25 23 / 0.2),
+    0 8px 18px -10px rgb(28 25 23 / 0.65);
+  --solid-shadow-pressed: inset 0 1px 3px rgb(0 0 0 / 0.45);
+  --menu-shadow:
+    0 1px 2px rgb(28 25 23 / 0.06), 0 16px 36px -18px rgb(28 25 23 / 0.5);
+  --slider-fill: #44403c;
+  --scroll-thumb: #d6d3d1;
+  --scroll-thumb-hover: #a8a29e;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 * {
   box-sizing: border-box;
@@ -373,37 +400,56 @@ nav button svg {
   justify-content: center;
   gap: 9px;
   white-space: nowrap;
-  border-radius: 999px;
+  border-radius: 9px;
   padding: 12px 18px;
   font-size: 12px;
   font-weight: 500;
   transition:
-    background 0.15s,
-    transform 0.15s;
+    background-color 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
-.button:hover:not(:disabled) {
-  transform: translateY(-1px);
+/* Solid buttons share one raised-then-pressed treatment. */
+.button.primary,
+.button.dark,
+.button.danger {
+  color: #fff;
+  box-shadow: var(--solid-shadow);
+}
+.button.primary:hover:not(:disabled),
+.button.dark:hover:not(:disabled),
+.button.danger:hover:not(:disabled) {
+  box-shadow: var(--solid-shadow-hover);
+}
+.button.primary:active:not(:disabled),
+.button.dark:active:not(:disabled),
+.button.danger:active:not(:disabled) {
+  box-shadow: var(--solid-shadow-pressed);
 }
 .button.primary {
   background: var(--ink);
-  color: #fff;
-  box-shadow: 0 1px 2px #0000001f;
 }
-.button.primary:hover {
+.button.primary:hover:not(:disabled) {
   background: #262626;
 }
 .button.dark {
   background: var(--ink);
-  color: #fff;
   padding: 13px 17px;
 }
+/* Secondary buttons look like the dropdown trigger. */
 .button.secondary {
   background: #fff;
-  border: 1px solid #e3e3e3;
+  border: 1px solid var(--control-border);
   color: var(--ink);
+  box-shadow: var(--control-shadow);
 }
-.button.secondary:hover {
-  background: #f6f6f6;
+.button.secondary:hover:not(:disabled) {
+  border-color: var(--control-border-hover);
+  box-shadow: var(--control-shadow-hover);
+}
+.button.secondary:active:not(:disabled) {
+  background: #fafaf9;
+  box-shadow: var(--control-shadow-pressed);
 }
 .button.full {
   width: 100%;
@@ -422,11 +468,15 @@ nav button svg {
   align-items: center;
   justify-content: center;
   padding: 7px;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
+  transition: background-color 0.15s;
 }
 .icon-button:hover {
-  background: #f0f0f0;
+  background: var(--control-highlight);
+}
+.icon-button:active {
+  background: var(--control-border);
 }
 .intro-grid {
   display: grid;
@@ -1213,8 +1263,7 @@ nav button svg {
   color: #5d5d5d;
 }
 .field input,
-.field textarea,
-.field select {
+.field textarea {
   font-size: 12px;
 }
 .field small {
@@ -1933,8 +1982,7 @@ td a {
   font-size: 11px;
 }
 .inspector .field input,
-.inspector .field textarea,
-.inspector .field select {
+.inspector .field textarea {
   font-size: 11px;
   padding: 9px;
 }
@@ -2556,7 +2604,6 @@ td a {
 }
 .button.danger {
   background: #a3402b;
-  color: #fff;
 }
 .asset-edit {
   margin-top: 8px;

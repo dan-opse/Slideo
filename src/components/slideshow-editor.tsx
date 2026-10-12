@@ -50,6 +50,9 @@ import {
 import { PhotoCanvas, usePhotoFonts } from "./photo-canvas";
 import { NumberInput } from "./number-input";
 import { arrowStep } from "./keys";
+import { Dropdown } from "./ui/dropdown";
+import { Slider } from "./ui/slider";
+import { canvasItems, fontItems, positionItems, styleItems } from "./options";
 import { collectionsOf, libraryAssets, plural } from "@/lib/defaults";
 
 async function request(action: string, data: Record<string, unknown> = {}) {
@@ -185,6 +188,13 @@ export default function SlideshowEditor({
   // Removed images stay selectable only where a slide already uses them.
   const pickable = (current?: string | null) =>
     state.assets.filter((asset) => !asset.removedAt || asset.id === current);
+  const assetItems = (empty: string, current?: string | null) => [
+    { value: "", label: empty },
+    ...pickable(current).map((asset) => ({
+      value: asset.id,
+      label: asset.name,
+    })),
+  ];
   const height = canvasHeight(post.aspect);
   const overflow = !!(
     fonts &&
@@ -977,44 +987,33 @@ export default function SlideshowEditor({
                       onChange={(fontSize) => patch({ fontSize })}
                     />
                     <Control label="Background image">
-                      <select
+                      <Dropdown
+                        label="Background image"
                         value={slide.assetId ?? ""}
-                        onChange={(event) =>
-                          patch({ assetId: event.target.value || null })
+                        items={assetItems("Solid color", slide.assetId)}
+                        onChange={(assetId) =>
+                          patch({ assetId: assetId || null })
                         }
-                      >
-                        <option value="">Solid color</option>
-                        {pickable(slide.assetId).map((asset) => (
-                          <option key={asset.id} value={asset.id}>
-                            {asset.name}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </Control>
                     <Control label="Typography">
-                      <select
+                      <Dropdown
+                        label="Typography"
                         value={slide.font}
-                        onChange={(event) =>
-                          patch({ font: event.target.value as Slide["font"] })
-                        }
-                      >
-                        <option value="serif">Serif</option>
-                        <option value="sans">Sans</option>
-                      </select>
+                        items={[
+                          { value: "serif", label: "Serif" },
+                          { value: "sans", label: "Sans" },
+                        ]}
+                        onChange={(font) => patch({ font })}
+                      />
                     </Control>
                     <Control label="Position">
-                      <select
+                      <Dropdown
+                        label="Position"
                         value={slide.position}
-                        onChange={(event) =>
-                          patch({
-                            position: event.target.value as Slide["position"],
-                          })
-                        }
-                      >
-                        <option value="top">Top</option>
-                        <option value="center">Center</option>
-                        <option value="bottom">Bottom</option>
-                      </select>
+                        items={positionItems}
+                        onChange={(position) => patch({ position })}
+                      />
                     </Control>
                   </div>
                 </div>
@@ -1036,18 +1035,12 @@ export default function SlideshowEditor({
                       </div>
                       <div className="photo-text-top">
                         <Control label="Font">
-                          <select
+                          <Dropdown
+                            label="Font"
                             value={layer.font}
-                            onChange={(event) =>
-                              patchLayer({
-                                font: event.target.value as PhotoText["font"],
-                              })
-                            }
-                          >
-                            <option value="default">Default</option>
-                            <option value="semibold">Semibold</option>
-                            <option value="regular">Regular</option>
-                          </select>
+                            items={fontItems}
+                            onChange={(font) => patchLayer({ font })}
+                          />
                         </Control>
                         <NumberControl
                           label="Size"
@@ -1067,7 +1060,9 @@ export default function SlideshowEditor({
                                 patchLayer({ color: event.target.value })
                               }
                             />
-                            <select
+                            <Dropdown
+                              variant="bare"
+                              label="Text color"
                               value={
                                 [
                                   "#ffffff",
@@ -1078,17 +1073,17 @@ export default function SlideshowEditor({
                                   ? layer.color
                                   : "custom"
                               }
-                              onChange={(event) => {
-                                if (event.target.value !== "custom")
-                                  patchLayer({ color: event.target.value });
+                              items={[
+                                { value: "#ffffff", label: "White" },
+                                { value: "#000000", label: "Black" },
+                                { value: "#ffe44d", label: "Yellow" },
+                                { value: "#ff5252", label: "Red" },
+                                { value: "custom", label: "Custom" },
+                              ]}
+                              onChange={(color) => {
+                                if (color !== "custom") patchLayer({ color });
                               }}
-                            >
-                              <option value="#ffffff">White</option>
-                              <option value="#000000">Black</option>
-                              <option value="#ffe44d">Yellow</option>
-                              <option value="#ff5252">Red</option>
-                              <option value="custom">Custom</option>
-                            </select>
+                            />
                           </div>
                         </Control>
                         <Control label="Style">
@@ -1110,25 +1105,20 @@ export default function SlideshowEditor({
                                 }}
                               />
                             )}
-                            <select
+                            <Dropdown
+                              variant="bare"
+                              label="Text style"
                               value={layer.style}
-                              onChange={(event) => {
-                                const next = restyle(
-                                  layer,
-                                  event.target.value as PhotoText["style"],
-                                );
+                              items={styleItems}
+                              onChange={(style) => {
+                                const next = restyle(layer, style);
                                 patchLayer({
                                   style: next.style,
                                   color: next.color,
                                   styleColor: next.styleColor,
                                 });
                               }}
-                            >
-                              <option value="outline">Outline</option>
-                              <option value="plain">Plain</option>
-                              <option value="shadow">Shadow</option>
-                              <option value="box">Background</option>
-                            </select>
+                            />
                           </div>
                         </Control>
                       </div>
@@ -1136,9 +1126,7 @@ export default function SlideshowEditor({
                         <Control
                           label={`Roundness · ${layer.roundness ?? DEFAULT_ROUNDNESS}%`}
                         >
-                          <input
-                            className="photo-range"
-                            type="range"
+                          <Slider
                             min={0}
                             max={100}
                             value={layer.roundness ?? DEFAULT_ROUNDNESS}
@@ -1310,30 +1298,28 @@ export default function SlideshowEditor({
                 <>
                   <div className="photo-image-top">
                     <Control label="Background image">
-                      <select
+                      <Dropdown
+                        label="Background image"
                         value={slide.assetId ?? ""}
-                        onChange={(event) =>
-                          patch({ assetId: event.target.value || null })
+                        items={assetItems("Solid color", slide.assetId)}
+                        onChange={(assetId) =>
+                          patch({ assetId: assetId || null })
                         }
-                      >
-                        <option value="">Solid color</option>
-                        {pickable(slide.assetId).map((asset) => (
-                          <option key={asset.id} value={asset.id}>
-                            {asset.name}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </Control>
                     <Control label="Collection">
-                      <select
+                      <Dropdown
+                        label="Collection"
                         value={collection}
-                        onChange={(event) => setCollection(event.target.value)}
-                      >
-                        <option value="">All images</option>
-                        {collectionsOf(state.assets).map((value) => (
-                          <option key={value}>{value}</option>
-                        ))}
-                      </select>
+                        items={[
+                          { value: "", label: "All images" },
+                          ...collectionsOf(state.assets).map((value) => ({
+                            value,
+                            label: value,
+                          })),
+                        ]}
+                        onChange={setCollection}
+                      />
                     </Control>
                   </div>
                   <div className="photo-image-strip">
@@ -1370,22 +1356,24 @@ export default function SlideshowEditor({
                   </div>
                   <div className="photo-image-controls">
                     <Control label="Image grid">
-                      <select
+                      <Dropdown
+                        label="Image grid"
                         value={slide.imageGrid ?? "none"}
-                        onChange={(event) =>
+                        items={[
+                          { value: "none", label: "Single image" },
+                          { value: "split", label: "2 images · stacked" },
+                          { value: "quad", label: "4 images · grid" },
+                        ]}
+                        onChange={(imageGrid) =>
                           patch({
-                            imageGrid: event.target.value as Slide["imageGrid"],
+                            imageGrid,
                             additionalAssetIds:
-                              event.target.value === "none"
+                              imageGrid === "none"
                                 ? []
                                 : (slide.additionalAssetIds ?? []),
                           })
                         }
-                      >
-                        <option value="none">Single image</option>
-                        <option value="split">2 images · stacked</option>
-                        <option value="quad">4 images · grid</option>
-                      </select>
+                      />
                     </Control>
                     {Array.from(
                       {
@@ -1398,9 +1386,14 @@ export default function SlideshowEditor({
                       },
                       (_, index) => (
                         <Control key={index} label={`Grid image ${index + 2}`}>
-                          <select
+                          <Dropdown
+                            label={`Grid image ${index + 2}`}
                             value={slide.additionalAssetIds?.[index] ?? ""}
-                            onChange={(event) => {
+                            items={assetItems(
+                              "No image",
+                              slide.additionalAssetIds?.[index],
+                            )}
+                            onChange={(id) => {
                               // Fill skipped slots with "" so the array never
                               // has holes (holes serialize as null and fail).
                               const current = slide.additionalAssetIds ?? [];
@@ -1408,34 +1401,23 @@ export default function SlideshowEditor({
                                 { length: Math.max(index + 1, current.length) },
                                 (_, i) => current[i] ?? "",
                               );
-                              ids[index] = event.target.value;
+                              ids[index] = id;
                               patch({ additionalAssetIds: ids });
                             }}
-                          >
-                            <option value="">No image</option>
-                            {pickable(slide.additionalAssetIds?.[index]).map(
-                              (asset) => (
-                                <option key={asset.id} value={asset.id}>
-                                  {asset.name}
-                                </option>
-                              ),
-                            )}
-                          </select>
+                          />
                         </Control>
                       ),
                     )}
                     <Control label="Fit">
-                      <select
+                      <Dropdown
+                        label="Fit"
                         value={slide.imageFit ?? "cover"}
-                        onChange={(event) =>
-                          patch({
-                            imageFit: event.target.value as Slide["imageFit"],
-                          })
-                        }
-                      >
-                        <option value="cover">Fill / crop</option>
-                        <option value="contain">Fit / letterbox</option>
-                      </select>
+                        items={[
+                          { value: "cover", label: "Fill / crop" },
+                          { value: "contain", label: "Fit / letterbox" },
+                        ]}
+                        onChange={(imageFit) => patch({ imageFit })}
+                      />
                     </Control>
                     <NumberControl
                       label="Image zoom %"
@@ -1498,10 +1480,11 @@ export default function SlideshowEditor({
                     />
                   </Control>
                   <Control label="Canvas">
-                    <select
+                    <Dropdown
+                      label="Canvas"
                       value={post.aspect}
-                      onChange={(event) => {
-                        const aspect = event.target.value as Post["aspect"];
+                      items={canvasItems}
+                      onChange={(aspect) => {
                         update({
                           ...post,
                           aspect,
@@ -1523,10 +1506,7 @@ export default function SlideshowEditor({
                           })),
                         });
                       }}
-                    >
-                      <option value="story">9:16 · 1080 × 1920</option>
-                      <option value="portrait">4:5 · 1080 × 1350</option>
-                    </select>
+                    />
                   </Control>
                   <Control label="Target account">
                     <input

@@ -57,6 +57,15 @@ import { PhotoCanvas, usePhotoFonts } from "./photo-canvas";
 import { NumberInput } from "./number-input";
 import { arrowStep } from "./keys";
 import { RenderFallback } from "./render-fallback";
+import { Dropdown } from "./ui/dropdown";
+import { Slider } from "./ui/slider";
+import {
+  canvasItems,
+  fontItems,
+  positionItems,
+  roleItems,
+  styleItems,
+} from "./options";
 
 type Page = "overview" | "template" | "hooks" | "schedule" | "settings";
 const pages = [
@@ -432,29 +441,28 @@ export default function FormatDashboard({
           </button>
           <div className="fd-brand">
             <span>{brand?.name.slice(0, 1) || "F"}</span>
-            <label>
+            <div className="fd-brand-picker">
               <small>Brand context</small>
-              <select
-                aria-label="Format brand"
+              <Dropdown
+                variant="bare"
+                label="Format brand"
+                placeholder="Choose a brand"
                 value={draft.brandId}
                 disabled={busy}
-                onChange={(event) =>
+                items={state.brands.map((brand) => ({
+                  value: brand.id,
+                  label: brand.name,
+                }))}
+                onChange={(brandId) =>
                   patch({
-                    brandId: event.target.value,
+                    brandId,
                     websiteUrl:
-                      state.brands.find(
-                        (brand) => brand.id === event.target.value,
-                      )?.destination || "",
+                      state.brands.find((brand) => brand.id === brandId)
+                        ?.destination || "",
                   })
                 }
-              >
-                {state.brands.map((brand) => (
-                  <option key={brand.id} value={brand.id}>
-                    {brand.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+              />
+            </div>
           </div>
           <nav aria-label="Format sections">
             {pages.map(([id, label, Icon]) => (
@@ -592,14 +600,16 @@ export default function FormatDashboard({
                       Slideshows <span>({posts.length})</span>
                     </h2>
                     <div>
-                      <select
-                        aria-label="Sort slideshows"
+                      <Dropdown
+                        variant="bare"
+                        label="Sort slideshows"
                         value={order}
-                        onChange={(event) => setOrder(event.target.value)}
-                      >
-                        <option value="recent">Recent first</option>
-                        <option value="oldest">Oldest first</option>
-                      </select>
+                        items={[
+                          { value: "recent", label: "Recent first" },
+                          { value: "oldest", label: "Oldest first" },
+                        ]}
+                        onChange={setOrder}
+                      />
                       {posts.length > 6 && (
                         <button onClick={() => setShowAll(!showAll)}>
                           {showAll ? "Show recent" : "View all"}
@@ -776,21 +786,18 @@ export default function FormatDashboard({
                       perspective, reading level, and style rules.
                     </p>
                     <Field label="Writing style">
-                      <select
+                      <Dropdown
+                        label="Writing style"
                         value={draft.tonePreset}
-                        onChange={(event) =>
+                        items={Object.entries(tonePresets).map(
+                          ([key, label]) => ({ value: key, label }),
+                        )}
+                        onChange={(value) =>
                           patch({
-                            tonePreset: event.target
-                              .value as Format["tonePreset"],
+                            tonePreset: value as Format["tonePreset"],
                           })
                         }
-                      >
-                        {Object.entries(tonePresets).map(([key, label]) => (
-                          <option key={key} value={key}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </Field>
                     {draft.tonePreset !== "custom" && (
                       <p className="fd-preset-note">
@@ -872,40 +879,35 @@ export default function FormatDashboard({
                     />
                   </Field>
                   <Field label="Canvas">
-                    <select
+                    <Dropdown
+                      label="Canvas"
                       value={draft.aspect}
-                      onChange={(event) =>
-                        patch({
-                          aspect: event.target.value as Format["aspect"],
-                        })
-                      }
-                    >
-                      <option value="story">9:16 · 1080 × 1920</option>
-                      <option value="portrait">4:5 · 1080 × 1350</option>
-                    </select>
+                      items={canvasItems}
+                      onChange={(aspect) => patch({ aspect })}
+                    />
                   </Field>
                 </div>
                 <Field label="Typography">
-                  <select
+                  <Dropdown
+                    label="Typography"
                     value={draft.font}
-                    onChange={(event) =>
+                    items={[
+                      {
+                        value: "tiktok",
+                        label: "Default · TikTok Sans / photo style",
+                      },
+                      { value: "serif", label: "Editorial serif" },
+                      { value: "sans", label: "Clean sans serif" },
+                    ]}
+                    onChange={(font) =>
                       // Role templates are kept (unused by editorial layouts)
                       // so switching back restores them.
                       patch({
-                        font: event.target.value as Format["font"],
-                        design:
-                          event.target.value === "tiktok"
-                            ? "photo"
-                            : "editorial",
+                        font,
+                        design: font === "tiktok" ? "photo" : "editorial",
                       })
                     }
-                  >
-                    <option value="tiktok">
-                      Default · TikTok Sans / photo style
-                    </option>
-                    <option value="serif">Editorial serif</option>
-                    <option value="sans">Clean sans serif</option>
-                  </select>
+                  />
                 </Field>
                 <div className="fd-field-row">
                   {[
@@ -967,19 +969,18 @@ export default function FormatDashboard({
                   </div>
                   <div className="fd-template-options">
                     <Field label={`${roleNames[role]} image collection`}>
-                      <select
+                      <Dropdown
+                        label={`${roleNames[role]} image collection`}
                         value={template.collection}
-                        onChange={(event) =>
-                          patchTemplate({ collection: event.target.value })
-                        }
-                      >
-                        <option value="">Solid background</option>
-                        {collections.map((collection) => (
-                          <option key={collection} value={collection}>
-                            {collection}
-                          </option>
-                        ))}
-                      </select>
+                        items={[
+                          { value: "", label: "Solid background" },
+                          ...collections.map((collection) => ({
+                            value: collection,
+                            label: collection,
+                          })),
+                        ]}
+                        onChange={(collection) => patchTemplate({ collection })}
+                      />
                     </Field>
                     <div className="fd-collection-strip">
                       {libraryAssets(state.assets)
@@ -1004,32 +1005,24 @@ export default function FormatDashboard({
                       )}
                     </div>
                     <Field label="Aspect ratio">
-                      <select
+                      <Dropdown
+                        label="Aspect ratio"
                         value={draft.aspect}
-                        onChange={(event) =>
-                          patch({
-                            aspect: event.target.value as Format["aspect"],
-                          })
-                        }
-                      >
-                        <option value="story">9:16</option>
-                        <option value="portrait">4:5</option>
-                      </select>
+                        items={canvasItems}
+                        onChange={(aspect) => patch({ aspect })}
+                      />
                     </Field>
                     <Field label="Image grid">
-                      <select
+                      <Dropdown
+                        label="Image grid"
                         value={template.imageGrid}
-                        onChange={(event) =>
-                          patchTemplate({
-                            imageGrid: event.target
-                              .value as RoleTemplate["imageGrid"],
-                          })
-                        }
-                      >
-                        <option value="none">None · single image</option>
-                        <option value="split">2 images · stacked</option>
-                        <option value="quad">4 images · grid</option>
-                      </select>
+                        items={[
+                          { value: "none", label: "None · single image" },
+                          { value: "split", label: "2 images · stacked" },
+                          { value: "quad", label: "4 images · grid" },
+                        ]}
+                        onChange={(imageGrid) => patchTemplate({ imageGrid })}
+                      />
                     </Field>
                     <Toggle
                       label="Dark overlay"
@@ -1042,8 +1035,7 @@ export default function FormatDashboard({
                       <Field
                         label={`Darkening · ${Math.round(template.overlay * 100)}%`}
                       >
-                        <input
-                          type="range"
+                        <Slider
                           min={0}
                           max={85}
                           value={template.overlay * 100}
@@ -1065,24 +1057,20 @@ export default function FormatDashboard({
                     <details>
                       <summary>Advanced</summary>
                       <Field label="Image fit">
-                        <select
+                        <Dropdown
+                          label="Image fit"
                           value={template.imageFit}
-                          onChange={(event) =>
-                            patchTemplate({
-                              imageFit: event.target
-                                .value as RoleTemplate["imageFit"],
-                            })
-                          }
-                        >
-                          <option value="cover">Crop to fill</option>
-                          <option value="contain">Fit entire image</option>
-                        </select>
+                          items={[
+                            { value: "cover", label: "Crop to fill" },
+                            { value: "contain", label: "Fit entire image" },
+                          ]}
+                          onChange={(imageFit) => patchTemplate({ imageFit })}
+                        />
                       </Field>
                       <Field
                         label={`Image zoom · ${template.imageZoom.toFixed(1)}×`}
                       >
-                        <input
-                          type="range"
+                        <Slider
                           min={1}
                           max={3}
                           step={0.1}
@@ -1099,8 +1087,7 @@ export default function FormatDashboard({
                           key={key}
                           label={`Image ${key === "imageX" ? "horizontal" : "vertical"} position · ${template[key]}%`}
                         >
-                          <input
-                            type="range"
+                          <Slider
                             min={0}
                             max={100}
                             value={template[key]}
@@ -1229,21 +1216,15 @@ export default function FormatDashboard({
                         />
                       </Field>
                       <Field label="Design">
-                        <select
+                        <Dropdown
+                          label="Design"
                           value={structure[current].role}
-                          onChange={(event) => {
-                            const next = event.target
-                              .value as StructureSlide["role"];
+                          items={roleItems}
+                          onChange={(next) => {
                             patchSlot(current, { role: next });
                             setRole(next);
                           }}
-                        >
-                          {Object.entries(roleNames).map(([key, label]) => (
-                            <option key={key} value={key}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
+                        />
                       </Field>
                     </div>
                     <Field label="Slide text">
@@ -1290,18 +1271,12 @@ export default function FormatDashboard({
                     </h2>
                     <div className="fd-design-grid">
                       <Field label="Font">
-                        <select
+                        <Dropdown
+                          label="Font"
                           value={template.font}
-                          onChange={(event) =>
-                            patchTemplate({
-                              font: event.target.value as RoleTemplate["font"],
-                            })
-                          }
-                        >
-                          <option value="default">Default</option>
-                          <option value="semibold">Semibold</option>
-                          <option value="regular">Regular</option>
-                        </select>
+                          items={fontItems}
+                          onChange={(font) => patchTemplate({ font })}
+                        />
                       </Field>
                       <Field label="Size">
                         <NumberInput
@@ -1318,25 +1293,19 @@ export default function FormatDashboard({
                         />
                       </Field>
                       <Field label="Style">
-                        <select
+                        <Dropdown
+                          label="Style"
                           value={template.style}
-                          onChange={(event) => {
-                            const next = restyle(
-                              template,
-                              event.target.value as RoleTemplate["style"],
-                            );
+                          items={styleItems}
+                          onChange={(style) => {
+                            const next = restyle(template, style);
                             patchTemplate({
                               style: next.style,
                               color: next.color,
                               styleColor: next.styleColor,
                             });
                           }}
-                        >
-                          <option value="outline">Outline</option>
-                          <option value="plain">Plain</option>
-                          <option value="shadow">Shadow</option>
-                          <option value="box">Background</option>
-                        </select>
+                        />
                       </Field>
                       {template.style === "plain" ? (
                         <span aria-hidden="true" />
@@ -1359,8 +1328,7 @@ export default function FormatDashboard({
                           label={`Roundness · ${template.roundness ?? DEFAULT_ROUNDNESS}%`}
                         >
                           <span className="fd-range">
-                            <input
-                              type="range"
+                            <Slider
                               min={0}
                               max={100}
                               value={template.roundness ?? DEFAULT_ROUNDNESS}
@@ -1376,19 +1344,12 @@ export default function FormatDashboard({
                         <span aria-hidden="true" />
                       )}
                       <Field label="Position">
-                        <select
+                        <Dropdown
+                          label="Position"
                           value={template.position}
-                          onChange={(event) =>
-                            patchTemplate({
-                              position: event.target
-                                .value as RoleTemplate["position"],
-                            })
-                          }
-                        >
-                          <option value="top">Top</option>
-                          <option value="center">Center</option>
-                          <option value="bottom">Bottom</option>
-                        </select>
+                          items={positionItems}
+                          onChange={(position) => patchTemplate({ position })}
+                        />
                       </Field>
                       <Field label="Width (%)">
                         <NumberInput
@@ -1399,19 +1360,16 @@ export default function FormatDashboard({
                         />
                       </Field>
                       <Field label="Alignment">
-                        <select
+                        <Dropdown
+                          label="Alignment"
                           value={template.align}
-                          onChange={(event) =>
-                            patchTemplate({
-                              align: event.target
-                                .value as RoleTemplate["align"],
-                            })
-                          }
-                        >
-                          <option value="left">Left</option>
-                          <option value="center">Center</option>
-                          <option value="right">Right</option>
-                        </select>
+                          items={[
+                            { value: "left", label: "Left" },
+                            { value: "center", label: "Center" },
+                            { value: "right", label: "Right" },
+                          ]}
+                          onChange={(align) => patchTemplate({ align })}
+                        />
                       </Field>
                     </div>
                   </div>

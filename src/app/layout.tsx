@@ -7,6 +7,7 @@ import "@fontsource/geist-mono/500.css";
 import "./globals.css";
 import "./photo-studio.css";
 import "./format-dashboard.css";
+import "./controls.css";
 export const metadata: Metadata = {
   title: "Slideo — Slideshow studio",
   description:
