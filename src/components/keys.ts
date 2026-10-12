@@ -16,12 +16,3 @@ export function arrowStep(event: KeyboardEvent): -1 | 0 | 1 {
     return 0;
   return step;
 }
-
-// How to scroll a slide into view: glide when stepping to another slide, jump
-// when only the layout changed (opening, zoom, grid), and always jump for
-// people who prefer reduced motion.
-export function slideScroll(stepped: boolean): ScrollBehavior {
-  return stepped && !matchMedia("(prefers-reduced-motion: reduce)").matches
-    ? "smooth"
-    : "instant";
-}
