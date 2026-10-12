@@ -8,6 +8,10 @@ export const photoTextSchema = z.object({
   size: z.number().min(6).max(48),
   color,
   style: z.enum(["outline", "plain", "shadow", "box"]),
+  // Outline, shadow or background color. Unset keeps the original black.
+  styleColor: color.optional(),
+  // Background corner rounding, 0 (square) to 100 (pill).
+  roundness: z.number().min(0).max(100).optional(),
   align: z.enum(["left", "center", "right"]),
   x: z.number().min(0).max(240),
   y: z.number().min(0).max(427),
@@ -46,6 +50,8 @@ export const roleTemplateSchema = z.object({
   font: photoTextSchema.shape.font,
   color,
   style: photoTextSchema.shape.style,
+  styleColor: color.optional(),
+  roundness: photoTextSchema.shape.roundness,
   size: photoTextSchema.shape.size,
   position: z.enum(["top", "center", "bottom"]),
   width: z.number().min(20).max(100),
@@ -54,9 +60,16 @@ export const roleTemplateSchema = z.object({
   imageZoom: z.number().min(1).max(3),
   imageX: z.number().min(0).max(100),
   imageY: z.number().min(0).max(100),
-  direction: z.string().max(2000),
 });
 export type RoleTemplate = z.infer<typeof roleTemplateSchema>;
+// One position in a format's slide-by-slide outline. `role` picks which
+// Hook/Content/CTA visual template the slide uses.
+export const structureSlideSchema = z.object({
+  label: z.string().trim().max(40),
+  role: z.enum(["hook", "body", "cta"]),
+  text: z.string().max(180),
+});
+export type StructureSlide = z.infer<typeof structureSlideSchema>;
 export const formatSchema = z.object({
   id: z.string().optional(),
   name: z.string().trim().min(1).max(80),
@@ -69,6 +82,8 @@ export const formatSchema = z.object({
   font: z.enum(["serif", "sans", "tiktok"]),
   design: z.enum(["editorial", "photo"]).optional(),
   slideCount: z.number().int().min(2).max(10),
+  // When set, it fixes the slide count and the order of slides.
+  structure: z.array(structureSlideSchema).min(2).max(10).optional(),
   brandId: z.string().optional(),
   websiteUrl: z.string().max(2000).optional(),
   hooks: z.array(z.string().trim().min(1).max(180)).max(200).optional(),

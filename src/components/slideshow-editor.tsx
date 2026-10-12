@@ -37,15 +37,19 @@ import {
 } from "lucide-react";
 import type { PhotoText, Post, Slide, StudioState } from "@/lib/schema";
 import {
+  DEFAULT_ROUNDNESS,
   canvasHeight,
   clamp,
   defaultText,
   fitText,
   layoutText,
   photoSlide,
+  recolorStyle,
+  restyle,
 } from "@/lib/photo-layout";
 import { PhotoCanvas, usePhotoFonts } from "./photo-canvas";
 import { NumberInput } from "./number-input";
+import { arrowStep } from "./keys";
 import { collectionsOf, libraryAssets } from "@/lib/defaults";
 
 async function request(action: string, data: Record<string, unknown> = {}) {
@@ -170,7 +174,7 @@ export default function SlideshowEditor({
   const root = useRef<HTMLDivElement>(null);
   const sheetOpener = useRef<HTMLElement | null>(null);
   const track = useRef<HTMLDivElement>(null);
-  const latest = useRef({ close: () => {} });
+  const latest = useRef({ close: () => {}, step: (_offset: number) => {} });
   const dirty = JSON.stringify(post) !== JSON.stringify(saved);
   const slide = post.slides[selected] ?? post.slides[0];
   const layers = slide.textLayers ?? [];
@@ -237,6 +241,10 @@ export default function SlideshowEditor({
   }
   useEffect(() => {
     latest.current.close = close;
+    // Arrow keys page through slides unless an action sheet is open.
+    latest.current.step = (offset) => {
+      if (!sheet) choose(selected + offset);
+    };
   });
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -247,6 +255,11 @@ export default function SlideshowEditor({
       if (event.key === "Escape") {
         event.preventDefault();
         latest.current.close();
+      }
+      const step = arrowStep(event);
+      if (step) {
+        event.preventDefault();
+        latest.current.step(step);
       }
       if (event.key === "Tab") {
         const focusRoot =
@@ -1079,21 +1092,64 @@ export default function SlideshowEditor({
                           </div>
                         </Control>
                         <Control label="Style">
-                          <select
-                            value={layer.style}
-                            onChange={(event) =>
-                              patchLayer({
-                                style: event.target.value as PhotoText["style"],
-                              })
-                            }
-                          >
-                            <option value="outline">Outline</option>
-                            <option value="plain">Plain</option>
-                            <option value="shadow">Shadow</option>
-                            <option value="box">Background</option>
-                          </select>
+                          <div className="photo-color">
+                            {layer.style !== "plain" && (
+                              <input
+                                type="color"
+                                value={layer.styleColor ?? "#000000"}
+                                aria-label={`${layer.style === "box" ? "Background" : layer.style === "shadow" ? "Shadow" : "Outline"} color`}
+                                onChange={(event) => {
+                                  const next = recolorStyle(
+                                    layer,
+                                    event.target.value,
+                                  );
+                                  patchLayer({
+                                    styleColor: next.styleColor,
+                                    color: next.color,
+                                  });
+                                }}
+                              />
+                            )}
+                            <select
+                              value={layer.style}
+                              onChange={(event) => {
+                                const next = restyle(
+                                  layer,
+                                  event.target.value as PhotoText["style"],
+                                );
+                                patchLayer({
+                                  style: next.style,
+                                  color: next.color,
+                                  styleColor: next.styleColor,
+                                });
+                              }}
+                            >
+                              <option value="outline">Outline</option>
+                              <option value="plain">Plain</option>
+                              <option value="shadow">Shadow</option>
+                              <option value="box">Background</option>
+                            </select>
+                          </div>
                         </Control>
                       </div>
+                      {layer.style === "box" && (
+                        <Control
+                          label={`Roundness · ${layer.roundness ?? DEFAULT_ROUNDNESS}%`}
+                        >
+                          <input
+                            className="photo-range"
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={layer.roundness ?? DEFAULT_ROUNDNESS}
+                            onChange={(event) =>
+                              patchLayer({
+                                roundness: Number(event.target.value),
+                              })
+                            }
+                          />
+                        </Control>
+                      )}
                       <div className="photo-text-bottom">
                         <div className="photo-control">
                           <span>Align</span>

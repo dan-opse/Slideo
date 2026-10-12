@@ -25,6 +25,7 @@ import {
   Plus,
   Settings2,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 import type {
@@ -32,21 +33,29 @@ import type {
   Post,
   RoleTemplate,
   Slide,
+  StructureSlide,
   StudioState,
 } from "@/lib/schema";
 import { formatSchema } from "@/lib/schema";
 import {
   roleNames,
+  slideStructure,
   templateFor,
   templateSlide,
   toneGuidance,
   tonePresets,
 } from "@/lib/format-template";
-import { PHOTO_RENDER_VERSION } from "@/lib/photo-layout";
+import {
+  DEFAULT_ROUNDNESS,
+  PHOTO_RENDER_VERSION,
+  recolorStyle,
+  restyle,
+} from "@/lib/photo-layout";
 import { collectionsOf, defaultBrandId, libraryAssets } from "@/lib/defaults";
 import { describeIssues } from "@/lib/errors";
 import { PhotoCanvas, usePhotoFonts } from "./photo-canvas";
 import { NumberInput } from "./number-input";
+import { arrowStep } from "./keys";
 import { RenderFallback } from "./render-fallback";
 
 type Page = "overview" | "template" | "hooks" | "schedule" | "settings";
@@ -97,6 +106,26 @@ function Toggle({
     </label>
   );
 }
+const styleLabel = (style: RoleTemplate["style"]) =>
+  style === "box" ? "Background" : style === "shadow" ? "Shadow" : "Outline";
+function ColorInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <span className="fd-color">
+      <input
+        type="color"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <code>{value.toUpperCase()}</code>
+    </span>
+  );
+}
 function normalize(format: Format, state: StudioState): Format {
   const brandId = defaultBrandId(state, format);
   return {
@@ -136,6 +165,7 @@ export default function FormatDashboard({
   const [page, setPage] = useState<Page>(initial.id ? "overview" : "settings");
   const [writingTab, setWritingTab] = useState<"hooks" | "tone">("hooks");
   const [role, setRole] = useState<Slide["role"]>("hook");
+  const [slot, setSlot] = useState(0);
   const [grid, setGrid] = useState(false);
   const [hooksText, setHooksText] = useState((initial.hooks ?? []).join("\n"));
   const [prompt, setPrompt] = useState("");
@@ -155,6 +185,12 @@ export default function FormatDashboard({
   );
   const brand = state.brands.find((item) => item.id === draft.brandId);
   const template = templateFor(draft, role);
+  const structure = slideStructure(draft);
+  const current = Math.min(slot, structure.length - 1);
+  const selectSlot = (index: number) => {
+    setSlot(index);
+    setRole(structure[index].role);
+  };
   const collections = collectionsOf(state.assets);
   const requestClose = useCallback(() => {
     if (busy) return;
@@ -165,6 +201,15 @@ export default function FormatDashboard({
   useEffect(() => {
     closeRef.current = requestClose;
   }, [requestClose]);
+  // Arrow keys move between preview slides on the Slideshow Format page.
+  const stepRef = useRef<(offset: number) => boolean>(() => false);
+  useEffect(() => {
+    stepRef.current = (offset) => {
+      if (page !== "template") return false;
+      selectSlot(Math.max(0, Math.min(structure.length - 1, current + offset)));
+      return true;
+    };
+  });
   useEffect(() => {
     if (suspended) return;
     const old = document.body.style.overflow;
@@ -183,6 +228,9 @@ export default function FormatDashboard({
         if (confirmation) setConfirmClose(false);
         else closeRef.current();
       }
+      const step = arrowStep(event);
+      if (step && !confirmation && stepRef.current(step))
+        event.preventDefault();
       if (event.key === "Tab") {
         const controls = [
           ...((confirmation ?? root.current)?.querySelectorAll<HTMLElement>(
@@ -218,14 +266,14 @@ export default function FormatDashboard({
   useEffect(() => {
     const container = previewTrack.current;
     const selected = container?.querySelector<HTMLElement>(
-      `[data-role="${role}"]`,
+      `[data-index="${current}"]`,
     );
     if (container && selected && !grid)
       container.scrollTo({
         left: selected.offsetLeft - container.offsetLeft - 22,
         behavior: "instant",
       });
-  }, [role, grid, page, fonts, draft.slideCount]);
+  }, [current, grid, page, fonts]);
   const patch = (change: Partial<Format>) => {
     setDraft((value) => ({ ...value, ...change }));
     setNotice("");
@@ -241,6 +289,35 @@ export default function FormatDashboard({
         [role]: { ...template, ...change },
       },
     });
+  // Editing the outline saves it on the format, which then fixes the count.
+  const patchStructure = (next: StructureSlide[]) =>
+    patch({ structure: next, slideCount: next.length });
+  const patchSlot = (index: number, change: Partial<StructureSlide>) =>
+    patchStructure(
+      structure.map((slide, i) =>
+        i === index ? { ...slide, ...change } : slide,
+      ),
+    );
+  const moveSlot = (index: number, offset: number) => {
+    const next = [...structure];
+    [next[index], next[index + offset]] = [next[index + offset], next[index]];
+    patchStructure(next);
+    setSlot(index + offset);
+  };
+  const addSlot = () => {
+    // New content goes before a closing CTA rather than after it.
+    const at =
+      structure.at(-1)?.role === "cta"
+        ? structure.length - 1
+        : structure.length;
+    patchStructure([
+      ...structure.slice(0, at),
+      { label: "New slide", role: "body", text: "" },
+      ...structure.slice(at),
+    ]);
+    setSlot(at);
+    setRole("body");
+  };
   const setHooks = (text: string) => {
     setHooksText(text);
     patch({
@@ -309,43 +386,35 @@ export default function FormatDashboard({
       : b.createdAt.localeCompare(a.createdAt),
   );
   const previewSlides = fonts
-    ? Array.from(
-        {
-          length: Math.max(2, Math.min(10, Math.round(draft.slideCount || 2))),
-        },
-        (_, index) => {
-          const kind =
-            index === 0
-              ? "hook"
-              : index === draft.slideCount - 1
-                ? "cta"
-                : "body";
-          const slide: Slide = {
-            id: `preview-${index}`,
-            role: kind,
-            title:
-              kind === "hook"
-                ? draft.hooks?.[0] || "A fresh perspective starts here"
-                : kind === "cta"
-                  ? "Make your next step count"
-                  : `One useful idea, clearly told`,
-            body:
-              kind === "body"
-                ? "Keep each slide focused on one thought your audience can use."
-                : "",
-            assetId: null,
-            background: draft.color,
-            ink: draft.ink,
-            accent: draft.accent,
-            font: "tiktok",
-            align: "center",
-            position: "center",
-            fontSize: 82,
-            overlay: 0.25,
-          };
-          return templateSlide(slide, draft, fonts, state.assets, index);
-        },
-      )
+    ? structure.map((slot, index) => {
+        const kind = slot.role;
+        const slide: Slide = {
+          id: `preview-${index}`,
+          role: kind,
+          title:
+            (index === 0 && draft.hooks?.[0]) ||
+            slot.text ||
+            (kind === "hook"
+              ? "A fresh perspective starts here"
+              : kind === "cta"
+                ? "Make your next step count"
+                : `One useful idea, clearly told`),
+          body:
+            kind === "body" && !slot.text
+              ? "Keep each slide focused on one thought your audience can use."
+              : "",
+          assetId: null,
+          background: draft.color,
+          ink: draft.ink,
+          accent: draft.accent,
+          font: "tiktok",
+          align: "center",
+          position: "center",
+          fontSize: 82,
+          overlay: 0.25,
+        };
+        return templateSlide(slide, draft, fonts, state.assets, index);
+      })
     : [];
   return (
     <div className="fd-backdrop" hidden={suspended}>
@@ -786,11 +855,16 @@ export default function FormatDashboard({
                 <div className="fd-field-row">
                   <Field
                     label="Default slide count"
-                    hint="The creation popup can override this number."
+                    hint={
+                      draft.structure
+                        ? "Set by the slide structure. Add or remove slides on the Slideshow Format page."
+                        : "The creation popup can override this number."
+                    }
                   >
                     <NumberInput
                       min={2}
                       max={10}
+                      disabled={!!draft.structure}
                       value={draft.slideCount}
                       onChange={(slideCount) =>
                         patch({ slideCount: Math.round(slideCount) })
@@ -1040,9 +1114,8 @@ export default function FormatDashboard({
                       ))}
                     </details>
                     <p className="fd-help">
-                      These controls apply to every{" "}
-                      {roleNames[role].toLowerCase()} slide. Saving visual
-                      changes uses the photo layout.
+                      These controls apply to every {roleNames[role]} slide.
+                      Saving visual changes uses the photo layout.
                     </p>
                   </div>
                 </aside>
@@ -1073,14 +1146,20 @@ export default function FormatDashboard({
                     {previewSlides.map((slide, index) => (
                       <button
                         key={slide.id}
-                        data-role={slide.role}
-                        className={slide.role === role ? "selected" : ""}
-                        onClick={() => setRole(slide.role)}
+                        data-index={index}
+                        aria-pressed={index === current}
+                        className={
+                          index === current
+                            ? "selected"
+                            : slide.role === role
+                              ? "same-style"
+                              : ""
+                        }
+                        onClick={() => selectSlot(index)}
                       >
                         <span>
-                          {slide.role === "body"
-                            ? `Content ${index}`
-                            : roleNames[slide.role]}
+                          {structure[index]?.label ||
+                            `${roleNames[slide.role]} ${index + 1}`}
                         </span>
                         <PhotoCanvas
                           slide={slide}
@@ -1090,9 +1169,126 @@ export default function FormatDashboard({
                         />
                       </button>
                     ))}
+                    {structure.length < 10 && (
+                      <button className="fd-add-slide" onClick={addSlot}>
+                        <span>&nbsp;</span>
+                        <div>
+                          <Plus size={20} />
+                          Add slide
+                        </div>
+                      </button>
+                    )}
                   </div>
+                  <section
+                    className="fd-slide-panel"
+                    aria-label={`Slide ${current + 1}`}
+                  >
+                    <header>
+                      <h2>
+                        Slide {current + 1}
+                        <small> of {structure.length}</small>
+                      </h2>
+                      <div className="fd-slide-actions">
+                        <button
+                          aria-label="Move slide left"
+                          disabled={current === 0}
+                          onClick={() => moveSlot(current, -1)}
+                        >
+                          <ArrowLeft size={15} />
+                        </button>
+                        <button
+                          aria-label="Move slide right"
+                          disabled={current === structure.length - 1}
+                          onClick={() => moveSlot(current, 1)}
+                        >
+                          <ArrowRight size={15} />
+                        </button>
+                        <button
+                          aria-label="Remove slide"
+                          disabled={structure.length <= 2}
+                          onClick={() => {
+                            patchStructure(
+                              structure.filter((_, i) => i !== current),
+                            );
+                            setSlot(Math.max(0, current - 1));
+                          }}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </header>
+                    <div className="fd-field-row">
+                      <Field label="Label">
+                        <input
+                          maxLength={40}
+                          value={structure[current].label}
+                          placeholder="e.g. #5, The problem, Reveal"
+                          onChange={(event) =>
+                            patchSlot(current, { label: event.target.value })
+                          }
+                        />
+                      </Field>
+                      <Field label="Design">
+                        <select
+                          value={structure[current].role}
+                          onChange={(event) => {
+                            const next = event.target
+                              .value as StructureSlide["role"];
+                            patchSlot(current, { role: next });
+                            setRole(next);
+                          }}
+                        >
+                          {Object.entries(roleNames).map(([key, label]) => (
+                            <option key={key} value={key}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                    </div>
+                    <Field label="Slide text">
+                      <input
+                        maxLength={180}
+                        value={structure[current].text}
+                        placeholder={
+                          structure[current].role === "hook"
+                            ? "e.g. 5 apps that fixed my sleep schedule"
+                            : structure[current].role === "cta"
+                              ? "e.g. Which one are you trying first?"
+                              : "e.g. #5 Rise — tracks your sleep debt"
+                        }
+                        onChange={(event) =>
+                          patchSlot(current, { text: event.target.value })
+                        }
+                      />
+                    </Field>
+                    <p className="fd-help">
+                      Manual drafts start with each slide’s text; AI drafts
+                      follow its pattern.{" "}
+                      {draft.structure ? (
+                        <>
+                          The structure sets the slide count.{" "}
+                          <button
+                            className="fd-link"
+                            onClick={() => {
+                              patch({ structure: undefined });
+                              setSlot(0);
+                            }}
+                          >
+                            Reset to a simple outline
+                          </button>
+                        </>
+                      ) : (
+                        "Editing a slide saves this outline and fixes the slide count."
+                      )}
+                    </p>
+                  </section>
                   <div className="fd-visual-settings">
-                    <div className="fd-font-controls">
+                    <h2>
+                      {roleNames[role]} design
+                      <small> · applies to every {roleNames[role]} slide</small>
+                    </h2>
+                    <div className="fd-design-grid">
                       <Field label="Font">
                         <select
                           value={template.font}
@@ -1107,31 +1303,6 @@ export default function FormatDashboard({
                           <option value="regular">Regular</option>
                         </select>
                       </Field>
-                      <Field label="Color">
-                        <input
-                          type="color"
-                          value={template.color}
-                          onChange={(event) =>
-                            patchTemplate({ color: event.target.value })
-                          }
-                        />
-                      </Field>
-                      <Field label="Style">
-                        <select
-                          value={template.style}
-                          onChange={(event) =>
-                            patchTemplate({
-                              style: event.target
-                                .value as RoleTemplate["style"],
-                            })
-                          }
-                        >
-                          <option value="outline">Outline</option>
-                          <option value="plain">Plain</option>
-                          <option value="shadow">Shadow</option>
-                          <option value="box">Background</option>
-                        </select>
-                      </Field>
                       <Field label="Size">
                         <NumberInput
                           min={6}
@@ -1140,8 +1311,70 @@ export default function FormatDashboard({
                           onChange={(size) => patchTemplate({ size })}
                         />
                       </Field>
-                    </div>
-                    <div className="fd-field-row">
+                      <Field label="Text color">
+                        <ColorInput
+                          value={template.color}
+                          onChange={(color) => patchTemplate({ color })}
+                        />
+                      </Field>
+                      <Field label="Style">
+                        <select
+                          value={template.style}
+                          onChange={(event) => {
+                            const next = restyle(
+                              template,
+                              event.target.value as RoleTemplate["style"],
+                            );
+                            patchTemplate({
+                              style: next.style,
+                              color: next.color,
+                              styleColor: next.styleColor,
+                            });
+                          }}
+                        >
+                          <option value="outline">Outline</option>
+                          <option value="plain">Plain</option>
+                          <option value="shadow">Shadow</option>
+                          <option value="box">Background</option>
+                        </select>
+                      </Field>
+                      {template.style === "plain" ? (
+                        <span aria-hidden="true" />
+                      ) : (
+                        <Field label={`${styleLabel(template.style)} color`}>
+                          <ColorInput
+                            value={template.styleColor ?? "#000000"}
+                            onChange={(styleColor) => {
+                              const next = recolorStyle(template, styleColor);
+                              patchTemplate({
+                                styleColor: next.styleColor,
+                                color: next.color,
+                              });
+                            }}
+                          />
+                        </Field>
+                      )}
+                      {template.style === "box" ? (
+                        <Field
+                          label={`Roundness · ${template.roundness ?? DEFAULT_ROUNDNESS}%`}
+                        >
+                          <span className="fd-range">
+                            <input
+                              type="range"
+                              min={0}
+                              max={100}
+                              value={template.roundness ?? DEFAULT_ROUNDNESS}
+                              onChange={(event) =>
+                                patchTemplate({
+                                  roundness: Number(event.target.value),
+                                })
+                              }
+                            />
+                          </span>
+                        </Field>
+                      ) : (
+                        <span aria-hidden="true" />
+                      )}
                       <Field label="Position">
                         <select
                           value={template.position}
@@ -1181,23 +1414,6 @@ export default function FormatDashboard({
                         </select>
                       </Field>
                     </div>
-                    <Field label={`${roleNames[role]} content direction`}>
-                      <textarea
-                        rows={2}
-                        maxLength={2000}
-                        value={template.direction}
-                        placeholder={
-                          role === "hook"
-                            ? "e.g. Open with a specific question that creates curiosity."
-                            : role === "cta"
-                              ? "e.g. End with one practical action the reader can take."
-                              : "e.g. Explain one point per slide in simple language."
-                        }
-                        onChange={(event) =>
-                          patchTemplate({ direction: event.target.value })
-                        }
-                      />
-                    </Field>
                   </div>
                 </div>
               </div>

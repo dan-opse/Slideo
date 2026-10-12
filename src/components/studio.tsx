@@ -295,6 +295,11 @@ function CreateSlideshowModal({
   const [ideaLoading, setIdeaLoading] = useState(false);
   const [ideaError, setIdeaError] = useState("");
   const canCreate = Boolean(brandId && formatId && topic.trim());
+  // A format with a saved structure fixes its own slide count.
+  const structured = state.formats.find(
+    (format) => format.id === formatId,
+  )?.structure;
+  const count = structured?.length ?? slideCount;
 
   const generateWebsiteIdeas = async () => {
     setIdeaLoading(true);
@@ -520,21 +525,23 @@ function CreateSlideshowModal({
           </Field>
         )}
         <div className="form-row">
-          <Field
-            label="Number of slides"
-            hint="Changing the format resets this to its default."
-          >
-            <input
-              type="number"
-              min={2}
-              max={10}
-              step={1}
-              required
-              value={slideCount}
-              onChange={(event) => setSlideCount(Number(event.target.value))}
-              onBlur={() => setSlideCount(clampCount(slideCount))}
-            />
-          </Field>
+          {!structured && (
+            <Field
+              label="Number of slides"
+              hint="Changing the format resets this to its default."
+            >
+              <input
+                type="number"
+                min={2}
+                max={10}
+                step={1}
+                required
+                value={slideCount}
+                onChange={(event) => setSlideCount(Number(event.target.value))}
+                onBlur={() => setSlideCount(clampCount(slideCount))}
+              />
+            </Field>
+          )}
           <Field label="Background collection">
             <select
               value={collection}
@@ -549,7 +556,8 @@ function CreateSlideshowModal({
         </div>
         <p className="slide-count-note">
           <Layers3 size={15} />
-          This slideshow will contain <strong>{slideCount} slides</strong>.
+          This slideshow will contain <strong>{count} slides</strong>
+          {structured && ", set by the format’s slide structure"}.
         </p>
         <Field label="Writing mode">
           <select
@@ -577,7 +585,7 @@ function CreateSlideshowModal({
           </button>
           <button
             className="button primary"
-            disabled={busy || !canCreate || slideCount < 2 || slideCount > 10}
+            disabled={busy || !canCreate || count < 2 || count > 10}
           >
             {busy ? (
               <Loader2 className="spin" size={17} />
