@@ -5,7 +5,6 @@ import {
   useState,
   type CSSProperties,
   type PointerEvent,
-  type ReactNode,
 } from "react";
 import Image from "next/image";
 import {
@@ -49,133 +48,23 @@ import {
   textProblem,
 } from "@/lib/photo-layout";
 import { PhotoCanvas, usePhotoFonts } from "./photo-canvas";
-import { NumberInput } from "./number-input";
+import { Control, NumberControl, SliderControl, Tool } from "./editor-controls";
+import { ActionSheet, localDate, type Sheet } from "./editor-sheet";
+import { Slider } from "./ui/slider";
 import { arrowStep } from "./keys";
+import { trapTab, useScrollLock } from "./dialog";
+import { exportPackage, studioAction } from "./request";
 import { ColorPicker } from "./ui/color-picker";
 import { Dropdown } from "./ui/dropdown";
-import { Slider } from "./ui/slider";
 import { canvasItems, fontItems, positionItems, styleItems } from "./options";
 import { collectionsOf, libraryAssets, plural } from "@/lib/defaults";
 
-async function request(action: string, data: Record<string, unknown> = {}) {
-  const response = await fetch("/api/studio", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, ...data }),
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok)
-    throw new Error(body.error || "The action could not be completed.");
-  return body;
-}
-function Control({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="photo-control">
-      <span>{label}</span>
-      {children}
-    </label>
-  );
-}
-function NumberControl({
-  label,
-  value,
-  min,
-  max,
-  step = 1,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <Control label={label}>
-      <NumberInput
-        value={value}
-        min={min}
-        max={max}
-        step={step}
-        onChange={onChange}
-      />
-    </Control>
-  );
-}
-// A slider in the editor dock, laid out like format customize: the value
-// rides in the label. onStart marks a new drag so it undoes as one step.
-function SliderControl({
-  label,
-  value,
-  min,
-  max,
-  step = 1,
-  onStart,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  onStart: () => void;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <Control label={label}>
-      <Slider
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onPointerDown={onStart}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
-    </Control>
-  );
-}
-function Tool({
-  label,
-  children,
-  onClick,
-  disabled,
-  pressed,
-}: {
-  label: string;
-  children: ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  pressed?: boolean;
-}) {
-  return (
-    <button
-      className="photo-tool"
-      type="button"
-      title={label}
-      aria-label={label}
-      aria-pressed={pressed}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  );
-}
 // Lock onto grid snaps text-box moves to 10-unit cells (24 across the
 // 240-wide canvas), the same cells on every slide.
 const GRID_STEP = 10;
 const snapTo = (value: number, max: number) =>
   clamp(Math.round(value / GRID_STEP) * GRID_STEP, 0, max);
 const SNAP_KEY = "slideo.lockToGrid";
-const localDate = (date: string) =>
-  date
-    ? new Date(
-        new Date(date).getTime() - new Date(date).getTimezoneOffset() * 60000,
-      )
-        .toISOString()
-        .slice(0, 16)
-    : "";
 
 export default function SlideshowEditor({
   initial,
@@ -216,9 +105,7 @@ export default function SlideshowEditor({
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [sheet, setSheet] = useState<
-    "discard" | "delete" | "queue" | "publish" | null
-  >(null);
+  const [sheet, setSheet] = useState<Sheet | null>(null);
   const [collection, setCollection] = useState("");
   const { fonts, error: fontError } = usePhotoFonts();
   const root = useRef<HTMLDivElement>(null);
@@ -320,10 +207,9 @@ export default function SlideshowEditor({
       if (!sheet) choose(selected + offset);
     };
   });
+  useScrollLock();
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    const oldOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     root.current?.focus();
     function key(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -335,33 +221,13 @@ export default function SlideshowEditor({
         event.preventDefault();
         latest.current.step(step);
       }
-      if (event.key === "Tab") {
-        const focusRoot =
-          root.current?.querySelector<HTMLElement>(".photo-sheet") ??
-          root.current;
-        const items = Array.from(
-          focusRoot?.querySelectorAll<HTMLElement>(
-            "button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),a[href]",
-          ) ?? [],
-        ).filter((item) => item.getClientRects().length);
-        const first = items[0],
-          last = items.at(-1);
-        if (
-          event.shiftKey &&
-          (document.activeElement === first ||
-            document.activeElement === root.current)
-        ) {
-          event.preventDefault();
-          last?.focus();
-        } else if (
-          !event.shiftKey &&
-          (document.activeElement === last ||
-            document.activeElement === root.current)
-        ) {
-          event.preventDefault();
-          first?.focus();
-        }
-      }
+      // An open action sheet holds focus; otherwise the whole window does.
+      trapTab(
+        event,
+        root.current?.querySelector<HTMLElement>(".photo-sheet") ??
+          root.current,
+        root.current,
+      );
     }
     // Registered before any popover opens, so this runs ahead of the
     // dropdown's and color picker's own outside-click listeners.
@@ -387,7 +253,6 @@ export default function SlideshowEditor({
     document.addEventListener("pointerdown", pointer, true);
     backdrop?.addEventListener("mousedown", outside);
     return () => {
-      document.body.style.overflow = oldOverflow;
       document.removeEventListener("keydown", key);
       document.removeEventListener("pointerdown", pointer, true);
       backdrop?.removeEventListener("mousedown", outside);
@@ -406,7 +271,7 @@ export default function SlideshowEditor({
       if (opener?.isConnected) opener.focus();
     };
   }, [sheet]);
-  function openSheet(next: NonNullable<typeof sheet>) {
+  function openSheet(next: Sheet) {
     sheetOpener.current = document.activeElement as HTMLElement | null;
     setSheet(next);
   }
@@ -465,7 +330,7 @@ export default function SlideshowEditor({
   }
   async function save() {
     if (!dirty) return saved;
-    const next: Post = await request("save", {
+    const next: Post = await studioAction("save", {
       id: post.id,
       expected: saved.revision,
       data: post,
@@ -479,15 +344,11 @@ export default function SlideshowEditor({
   }
   async function review() {
     const next = await save();
-    await request("render", { id: next.id, revision: next.revision });
+    await studioAction("render", { id: next.id, revision: next.revision });
     setEditing(false);
   }
   async function download() {
-    const response = await fetch(
-      `/api/export/${saved.id}?revision=${saved.revision}`,
-    );
-    if (!response.ok) throw new Error((await response.json()).error);
-    const url = URL.createObjectURL(await response.blob());
+    const url = URL.createObjectURL(await exportPackage(saved));
     const link = document.createElement("a");
     link.href = url;
     link.download = `${saved.title.replace(/[^a-z0-9]+/gi, "-").slice(0, 70)}.zip`;
@@ -881,11 +742,11 @@ export default function SlideshowEditor({
                     disabled={busy}
                     onClick={() =>
                       action(async () => {
-                        await request("render", {
+                        await studioAction("render", {
                           id: saved.id,
                           revision: saved.revision,
                         });
-                        const next = await request("approve", {
+                        const next = await studioAction("approve", {
                           id: saved.id,
                           revision: saved.revision,
                         });
@@ -958,7 +819,9 @@ export default function SlideshowEditor({
                   disabled={busy}
                   onClick={() =>
                     action(async () => {
-                      const next = await request("restore", { id: saved.id });
+                      const next = await studioAction("restore", {
+                        id: saved.id,
+                      });
                       setPost(next);
                       setSaved(next);
                       await onSaved();
@@ -1717,7 +1580,7 @@ export default function SlideshowEditor({
                     onClick={() =>
                       action(async () => {
                         const current = await save();
-                        await request("duplicate", { id: current.id });
+                        await studioAction("duplicate", { id: current.id });
                         await onSaved();
                         onToast("A copy is ready in your slideshow gallery.");
                       })
@@ -1738,7 +1601,7 @@ export default function SlideshowEditor({
                   disabled={busy}
                   onClick={() =>
                     action(async () => {
-                      await request("duplicate", { id: saved.id });
+                      await studioAction("duplicate", { id: saved.id });
                       await onSaved();
                       onToast("A copy is ready in your slideshow gallery.");
                     })
@@ -1753,233 +1616,87 @@ export default function SlideshowEditor({
         )}
       </section>
       {sheet && (
-        <div className="photo-sheet-backdrop">
-          <div
-            className="photo-sheet"
-            role="dialog"
-            aria-modal="true"
-            tabIndex={-1}
-            aria-label={
-              sheet === "discard"
-                ? "Unsaved changes"
-                : sheet === "queue"
-                  ? "Add to queue"
-                  : sheet === "publish"
-                    ? "Publish to TikTok"
-                    : "Delete slideshow"
-            }
-          >
-            <button
-              className="photo-tool sheet-close"
-              aria-label="Close action"
-              onClick={() => setSheet(null)}
-            >
-              <X size={17} />
-            </button>
-            {sheet === "discard" ? (
-              <>
-                <h2>Keep your changes?</h2>
-                <p>Your slideshow has unsaved edits.</p>
-                <div className="photo-sheet-buttons">
-                  <button
-                    className="photo-action"
-                    onClick={() => {
-                      setPost(saved);
-                      setPast([]);
-                      setFuture([]);
-                      choose(0);
-                      setSheet(null);
-                      setEditing(false);
-                    }}
-                  >
-                    Discard changes
-                  </button>
-                  <button
-                    className="photo-action orange"
-                    disabled={busy}
-                    onClick={() =>
-                      action(async () => {
-                        await review();
-                        setSheet(null);
-                      })
-                    }
-                  >
-                    Save changes
-                  </button>
-                </div>
-              </>
-            ) : sheet === "delete" ? (
-              <>
-                <h2>Delete this slideshow?</h2>
-                <p>
-                  It will be removed from your gallery. Its revisions remain
-                  stored locally.
-                </p>
-                <button
-                  className="photo-action danger"
-                  disabled={busy}
-                  onClick={() =>
-                    action(async () => {
-                      await request("archive", { id: saved.id });
-                      await onSaved();
-                      onClose();
-                    })
-                  }
-                >
-                  Delete slideshow
-                </button>
-              </>
-            ) : sheet === "queue" ? (
-              <>
-                <h2>Add to your queue</h2>
-                <p>
-                  Choose a planned posting time. You’ll publish manually after
-                  approval.
-                </p>
-                {saved.status === "approved" && (
-                  <p className="photo-sheet-warning" role="note">
-                    The posting time is part of your approval, so scheduling
-                    creates a new revision that needs approving again before you
-                    can download it.
-                  </p>
-                )}
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const form = new FormData(event.currentTarget);
-                    const value = form.get("plannedAt") as string;
-                    // Re-approval only happens when the owner explicitly asks.
-                    const reapprove =
-                      (
-                        event.nativeEvent as SubmitEvent
-                      ).submitter?.getAttribute("value") === "approve";
-                    action(async () => {
-                      let next: Post = await request("save", {
-                        id: saved.id,
-                        expected: saved.revision,
-                        data: {
-                          ...post,
-                          plannedAt: new Date(value).toISOString(),
-                        },
-                      });
-                      if (reapprove) {
-                        await request("render", {
-                          id: next.id,
-                          revision: next.revision,
-                        });
-                        next = await request("approve", {
-                          id: next.id,
-                          revision: next.revision,
-                        });
-                      }
-                      setPost(next);
-                      setSaved(next);
-                      await onSaved();
-                      setSheet(null);
-                      onToast(
-                        reapprove
-                          ? "Scheduled and approved again for export."
-                          : saved.status === "approved"
-                            ? "Scheduled. Approve it again before downloading."
-                            : "Added to your calendar for review.",
-                      );
-                    });
-                  }}
-                >
-                  <Control label="Planned posting time">
-                    <input
-                      name="plannedAt"
-                      type="datetime-local"
-                      required
-                      defaultValue={localDate(post.plannedAt)}
-                    />
-                  </Control>
-                  <button
-                    className={`photo-action ${saved.status === "approved" ? "" : "orange"}`}
-                    disabled={busy}
-                    value="queue"
-                  >
-                    Save to queue
-                  </button>
-                  {saved.status === "approved" && (
-                    <button
-                      className="photo-action orange"
-                      disabled={busy}
-                      value="approve"
-                    >
-                      Save and approve again
-                    </button>
-                  )}
-                </form>
-              </>
-            ) : (
-              <>
-                <h2>
-                  {saved.status === "published"
-                    ? "Correct the TikTok link"
-                    : "Publish to TikTok"}
-                </h2>
-                <p>
-                  {saved.status === "published"
-                    ? `Recorded as ${saved.publishedUrl}. Replace it only if that link is wrong.`
-                    : "Download the approved images, upload them in TikTok, then record the published link here."}
-                </p>
-                <button
-                  className="photo-action blue"
-                  disabled={busy}
-                  onClick={() => action(download)}
-                >
-                  <Download size={16} />
-                  Download images
-                </button>
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const url = new FormData(event.currentTarget).get("url");
-                    const replace = saved.status === "published";
-                    action(async () => {
-                      const next = await request("publish", {
-                        id: saved.id,
-                        revision: saved.revision,
-                        url,
-                        replace,
-                      });
-                      setPost(next);
-                      setSaved(next);
-                      await onSaved();
-                      setSheet(null);
-                      onToast(
-                        replace
-                          ? "TikTok link corrected."
-                          : "Published post recorded.",
-                      );
-                    });
-                  }}
-                >
-                  <Control label="TikTok post URL">
-                    <input
-                      name="url"
-                      type="url"
-                      required
-                      defaultValue={saved.publishedUrl ?? ""}
-                      placeholder="https://www.tiktok.com/@you/photo/… or https://vm.tiktok.com/…"
-                    />
-                  </Control>
-                  <button className="photo-action orange" disabled={busy}>
-                    {saved.status === "published"
-                      ? "Save corrected link"
-                      : "Record published post"}
-                  </button>
-                </form>
-              </>
-            )}
-            {error && (
-              <p role="alert" className="photo-error">
-                {error}
-              </p>
-            )}
-          </div>
-        </div>
+        <ActionSheet
+          sheet={sheet}
+          saved={saved}
+          plannedAt={post.plannedAt}
+          busy={busy}
+          error={error}
+          onDismiss={() => setSheet(null)}
+          onDiscard={() => {
+            setPost(saved);
+            setPast([]);
+            setFuture([]);
+            choose(0);
+            setSheet(null);
+            setEditing(false);
+          }}
+          onSaveChanges={() =>
+            action(async () => {
+              await review();
+              setSheet(null);
+            })
+          }
+          onDelete={() =>
+            action(async () => {
+              await studioAction("archive", { id: saved.id });
+              await onSaved();
+              onClose();
+            })
+          }
+          onQueue={(plannedAt, reapprove) =>
+            action(async () => {
+              let next: Post = await studioAction("save", {
+                id: saved.id,
+                expected: saved.revision,
+                data: {
+                  ...post,
+                  plannedAt,
+                },
+              });
+              if (reapprove) {
+                await studioAction("render", {
+                  id: next.id,
+                  revision: next.revision,
+                });
+                next = await studioAction("approve", {
+                  id: next.id,
+                  revision: next.revision,
+                });
+              }
+              setPost(next);
+              setSaved(next);
+              await onSaved();
+              setSheet(null);
+              onToast(
+                reapprove
+                  ? "Scheduled and approved again for export."
+                  : saved.status === "approved"
+                    ? "Scheduled. Approve it again before downloading."
+                    : "Added to your calendar for review.",
+              );
+            })
+          }
+          onDownload={() => action(download)}
+          onPublish={(url) => {
+            const replace = saved.status === "published";
+            action(async () => {
+              const next = await studioAction("publish", {
+                id: saved.id,
+                revision: saved.revision,
+                url,
+                replace,
+              });
+              setPost(next);
+              setSaved(next);
+              await onSaved();
+              setSheet(null);
+              onToast(
+                replace ? "TikTok link corrected." : "Published post recorded.",
+              );
+            });
+          }}
+        />
       )}
     </div>
   );
