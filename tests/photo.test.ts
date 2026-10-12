@@ -18,6 +18,8 @@ import {
   layoutText,
   imageRect,
   fitText,
+  recolorStyle,
+  restyle,
 } from "../src/lib/photo-layout";
 import { postSchema, photoTextSchema, type Post } from "../src/lib/schema";
 import { seedSamplePost } from "./sample-post";
@@ -51,7 +53,7 @@ test("TikTok preset preserves existing posts and matches the reference defaults"
   const text = fitText(reference, font, "story");
   assert.deepEqual(
     [text.size, text.width, text.height, text.x, text.y],
-    [14, 208, 34, 16, 197],
+    [12, 208, 34, 16, 197],
   );
   assert.equal(layoutText(text, font).lines.length, 2);
   assert.equal(layoutText(text, font).overflow, false);
@@ -298,4 +300,103 @@ test("photo rendering includes images, letterboxing and darkening", async () => 
   const top = await sharp(topBuffer).stats();
   assert.ok(center.channels[0].mean > 100 && center.channels[0].mean < 120);
   assert.ok(top.channels.every((channel) => channel.max < 5));
+});
+
+test("text styles draw in the chosen style color, defaulting to black", () => {
+  const text = { ...reference, style: "box" as const };
+  assert.match(photoTextSvg(text, font), /Z" fill="#000"/);
+  assert.match(
+    photoTextSvg({ ...text, styleColor: "#ffffff" }, font),
+    /Z" fill="#ffffff"/,
+  );
+  assert.match(
+    photoTextSvg({ ...reference, styleColor: "#ff0000" }, font),
+    /stroke="#ff0000"/,
+  );
+  assert.match(
+    photoTextSvg(
+      { ...reference, style: "shadow", styleColor: "#00ff00" },
+      font,
+    ),
+    /fill="#00ff00" stroke="#00ff00"/,
+  );
+  assert.doesNotThrow(() =>
+    photoTextSchema.parse({ ...reference, styleColor: "#123abc" }),
+  );
+  assert.throws(() =>
+    photoTextSchema.parse({ ...reference, styleColor: "red" }),
+  );
+});
+
+test("background style hugs each line, splits at blank lines and rounds its corners", async () => {
+  const layer = {
+    ...reference,
+    text: "Hi\nA much longer second line",
+    style: "box" as const,
+    color: "#000000",
+    styleColor: "#ffffff",
+  };
+  const pixels = async (svg: string) =>
+    sharp(
+      Buffer.from(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="427"><rect width="240" height="427" fill="#000"/>${svg}</svg>`,
+      ),
+    )
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+  const { data, info } = await pixels(photoTextSvg(layer, font));
+  const at = (x: number, y: number) =>
+    data[(y * info.width + x) * info.channels];
+  const [first, second] = layoutText(layer, font).rows;
+  const middle = (row: { top: number; bottom: number }) =>
+    Math.round((row.top + row.bottom) / 2);
+  // Left of the short first line is empty; the longer line below is covered.
+  // In the padding just left of the long line's first letter.
+  const x = Math.round(second.x - 2);
+  assert.ok(x < first.x - 10);
+  assert.ok(at(x, middle(first)) < 40, "no background beside the short line");
+  assert.ok(at(x, middle(second)) > 200, "background behind the long line");
+  // The blob does not fill the whole text box any more.
+  assert.ok(at(reference.x + 1, middle(first)) < 40);
+  assert.equal(
+    photoTextSvg({ ...layer, text: "One\n\nTwo" }, font).match(/Z/g)?.length,
+    2,
+    "a blank line splits the background",
+  );
+  assert.notEqual(
+    photoTextSvg({ ...layer, roundness: 0 }, font),
+    photoTextSvg({ ...layer, roundness: 100 }, font),
+  );
+  assert.throws(() => photoTextSchema.parse({ ...layer, roundness: 101 }));
+});
+
+test("switching to a background swaps white and black text like TikTok", () => {
+  const white = { style: "outline" as const, color: "#ffffff" };
+  const boxed = restyle(white, "box");
+  assert.deepEqual(boxed, {
+    style: "box",
+    color: "#000000",
+    styleColor: "#ffffff",
+  });
+  assert.deepEqual(restyle(boxed, "outline"), {
+    style: "outline",
+    color: "#ffffff",
+    styleColor: "#000000",
+  });
+  assert.deepEqual(restyle({ style: "plain", color: "#000000" }, "box"), {
+    style: "box",
+    color: "#ffffff",
+    styleColor: "#000000",
+  });
+  assert.equal(
+    restyle({ style: "plain", color: "#ffe44d" }, "box").color,
+    "#ffe44d",
+  );
+  assert.equal(recolorStyle(boxed, "#000000").color, "#ffffff");
+  assert.equal(recolorStyle(boxed, "#ffe44d").color, "#000000");
+  assert.equal(
+    recolorStyle({ style: "outline" as const, color: "#ffffff" }, "#ff0000")
+      .color,
+    "#ffffff",
+  );
 });

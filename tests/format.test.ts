@@ -6,7 +6,11 @@ import { tmpdir } from "node:os";
 import sharp from "sharp";
 import type { Brand, Format, Post, Asset } from "../src/lib/schema";
 import { formatSchema } from "../src/lib/schema";
-import { templateFor, imageSlots } from "../src/lib/format-template";
+import {
+  templateFor,
+  imageSlots,
+  slideStructure,
+} from "../src/lib/format-template";
 import { seedSamplePost } from "./sample-post";
 const folder = mkdtempSync(path.join(tmpdir(), "slideo-format-test-"));
 process.env.STUDIO_DATA_DIR = folder;
@@ -33,7 +37,6 @@ const format: Format = {
       ...templateFor(base, "hook"),
       collection: "test-images",
       imageGrid: "split",
-      direction: "HOOK_ONLY_SENTINEL",
       overlay: 0,
     },
     body: {
@@ -168,10 +171,19 @@ test("manual creation snapshots role templates and preserves popup count and sel
 });
 
 test("hook prompts omit slideshow tone and caption instructions", () => {
-  const hookInput = hookWritingInput(brand, format, "My custom hook prompt");
+  const outlined: Format = {
+    ...format,
+    structure: [
+      { label: "Hook", role: "hook", text: "HOOK_ONLY_SENTINEL" },
+      { label: "Tip", role: "body", text: "SLIDE_TWO_SENTINEL" },
+    ],
+  };
+  const hookInput = hookWritingInput(brand, outlined, "My custom hook prompt");
   assert.equal(hookInput.prompt, "My custom hook prompt");
-  assert.match(JSON.stringify(hookInput), /HOOK_ONLY_SENTINEL/);
+  assert.equal(hookInput.hookPattern, "HOOK_ONLY_SENTINEL");
   assert.doesNotMatch(JSON.stringify(hookInput), /BODY_ONLY_SENTINEL/);
+  assert.doesNotMatch(JSON.stringify(hookInput), /SLIDE_TWO_SENTINEL/);
+  assert.equal(hookWritingInput(brand, format, "").hookPattern, "");
   const writingInput = slideshowWritingInput(
     brand,
     format,
@@ -181,7 +193,6 @@ test("hook prompts omit slideshow tone and caption instructions", () => {
   );
   assert.equal(writingInput.openingHook, format.hooks![0]);
   assert.match(JSON.stringify(writingInput), /BODY_ONLY_SENTINEL/);
-  assert.doesNotMatch(JSON.stringify(writingInput), /HOOK_ONLY_SENTINEL/);
   const source = {
     url: "https://example.com/",
     title: "Example",
@@ -417,4 +428,91 @@ test("failed hook requests preserve formats and count attempts; the daily limit 
     globalThis.fetch = fetchBefore;
     process.env.AI_DAILY_CALL_LIMIT = "50";
   }
+});
+
+test("a saved slide structure sets the order, styles, text and count of new drafts", async () => {
+  const structured: Format = {
+    ...format,
+    id: "structured-format",
+    hooks: [],
+    slideCount: 9,
+    structure: [
+      { label: "Hook", role: "hook", text: "3 apps that fixed my sleep" },
+      { label: "#3", role: "body", text: "#3 Rise" },
+      { label: "Plug", role: "cta", text: "" },
+      { label: "#1", role: "body", text: "" },
+    ],
+  };
+  store.put("format", structured);
+  const saved = await request({ action: "format", data: structured });
+  assert.equal(saved.status, 200);
+  assert.equal((await saved.json()).slideCount, 4, "count follows structure");
+  const response = await request({
+    action: "create",
+    brandId: brand.id,
+    formatId: structured.id,
+    topic: "Sleep apps",
+    mode: "manual",
+    slideCount: 8,
+  });
+  assert.equal(response.status, 200);
+  const post: Post = await response.json();
+  assert.deepEqual(
+    post.slides.map((slide) => [slide.role, slide.title]),
+    [
+      ["hook", "3 apps that fixed my sleep"],
+      ["body", "#3 Rise"],
+      ["cta", "Your idea 2"],
+      ["body", "What will you try next?"],
+    ],
+  );
+  // A CTA-styled slide in the middle uses the CTA template.
+  assert.equal(post.slides[2].textLayers![0].size, 16);
+  const hooked = await request({
+    action: "create",
+    brandId: brand.id,
+    formatId: structured.id,
+    topic: "Sleep apps",
+    selectedHook: "A hook I picked",
+    mode: "manual",
+  });
+  assert.equal(
+    ((await hooked.json()) as Post).slides[0].title,
+    "A hook I picked",
+  );
+  const input = slideshowWritingInput(brand, structured, "Topic", "", 4);
+  assert.deepEqual(input.slideStructure?.[1], {
+    label: "#3",
+    purpose: "Content",
+    pattern: "#3 Rise",
+  });
+  assert.equal(
+    hookWritingInput(brand, structured, "").hookPattern,
+    "3 apps that fixed my sleep",
+  );
+  assert.equal(
+    slideshowWritingInput(brand, format, "Topic", "", 4).slideStructure,
+    undefined,
+  );
+  assert.throws(() =>
+    formatSchema.parse({
+      ...structured,
+      structure: structured.structure!.slice(0, 1),
+    }),
+  );
+});
+
+test("formats without a structure keep the hook, content and CTA outline", () => {
+  assert.deepEqual(
+    slideStructure({ ...format, structure: undefined }, 4).map((slide) => [
+      slide.role,
+      slide.label,
+    ]),
+    [
+      ["hook", "Hook"],
+      ["body", "Content 1"],
+      ["body", "Content 2"],
+      ["cta", "CTA"],
+    ],
+  );
 });

@@ -46,7 +46,11 @@ import {
 import { readWebsite } from "@/lib/website";
 import { photoFont } from "@/lib/photo-render";
 import { photoSlide } from "@/lib/photo-layout";
-import { slideAssetIds, templateSlide } from "@/lib/format-template";
+import {
+  slideAssetIds,
+  slideStructure,
+  templateSlide,
+} from "@/lib/format-template";
 import { describeIssues } from "@/lib/errors";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -223,7 +227,11 @@ export async function POST(req: NextRequest) {
       const data = formatSchema.parse(input.data);
       if (data.id) get<Format>("format", data.id);
       if (data.brandId) get<Brand>("brand", data.brandId);
-      const item = { ...data, id: data.id || uid() };
+      const item = {
+        ...data,
+        slideCount: data.structure?.length ?? data.slideCount,
+        id: data.id || uid(),
+      };
       put("format", item);
       return NextResponse.json(item);
     }
@@ -324,7 +332,12 @@ export async function POST(req: NextRequest) {
         .parse(input);
       const brand = get<Brand>("brand", args.brandId),
         format = get<Format>("format", args.formatId);
-      const slideCount = args.slideCount ?? Math.min(format.slideCount, 10);
+      // A saved structure fixes the slides; otherwise the popup's count applies.
+      const structure = slideStructure(
+        format,
+        args.slideCount ?? Math.min(format.slideCount, 10),
+      );
+      const slideCount = structure.length;
       const copy =
         args.mode === "ai"
           ? await generateCopy(
@@ -341,13 +354,15 @@ export async function POST(req: NextRequest) {
               title: args.topic.slice(0, 160),
               caption: "",
               flags: [],
-              slides: Array.from({ length: slideCount }, (_, i) => ({
+              slides: structure.map((slide, i) => ({
                 title:
-                  i === 0
-                    ? args.selectedHook || args.topic.slice(0, 180)
+                  (i === 0 && args.selectedHook) ||
+                  slide.text ||
+                  (i === 0
+                    ? args.topic.slice(0, 180)
                     : i === slideCount - 1
                       ? "What will you try next?"
-                      : `Your idea ${i}`,
+                      : `Your idea ${i}`),
                 body: "",
               })),
             };
@@ -370,8 +385,7 @@ export async function POST(req: NextRequest) {
         slides: copy.slides.map((s, i) => ({
           ...s,
           id: uid(),
-          role:
-            i === 0 ? "hook" : i === copy.slides.length - 1 ? "cta" : "body",
+          role: structure[i].role,
           assetId: assets[i]?.id || null,
           background: format.color,
           ink: format.ink,

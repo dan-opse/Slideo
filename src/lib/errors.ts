@@ -45,7 +45,6 @@ const labels: Record<string, string> = {
   imageZoom: "Image zoom",
   imageX: "Image position X",
   imageY: "Image position Y",
-  direction: "Content direction",
   collection: "Collection",
   rights: "Usage rights",
   slides: "Slides",
@@ -58,6 +57,10 @@ const labels: Record<string, string> = {
   url: "URL",
   selectedHook: "Opening hook",
   hooks: "Hooks",
+  structure: "Slide structure",
+  label: "Label",
+  styleColor: "Style color",
+  roundness: "Roundness",
 };
 const roles: Record<string, string> = {
   hook: "Hook",
@@ -75,6 +78,9 @@ function where(path: PropertyKey[]) {
       i++;
     } else if (key === "textLayers" && typeof next === "number") {
       parts.push(`text box ${next + 1}`);
+      i++;
+    } else if (key === "structure" && typeof next === "number") {
+      parts.push(`Structure slide ${next + 1}`);
       i++;
     } else if (key === "hooks" && typeof next === "number") {
       parts.push(`Hook ${next + 1}`);

@@ -580,6 +580,13 @@
   color: #121212;
   background: white;
 }
+.photo-control input.photo-range {
+  border: 0;
+  padding: 0;
+  height: 24px;
+  background: none;
+  accent-color: #4c4c4c;
+}
 .photo-control input[type="number"] {
   background: #efefef;
   border-color: transparent;

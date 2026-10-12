@@ -1,5 +1,12 @@
 import type { Font } from "opentype.js";
-import type { Asset, Format, PhotoText, RoleTemplate, Slide } from "./schema";
+import type {
+  Asset,
+  Format,
+  PhotoText,
+  RoleTemplate,
+  Slide,
+  StructureSlide,
+} from "./schema";
 import { canvasHeight, defaultText, fitText, photoSlide } from "./photo-layout";
 
 export const roleNames = { hook: "Hook", body: "Content", cta: "CTA" } as const;
@@ -22,6 +29,24 @@ export const toneGuidance = {
     "Use direct language, short sentences, and one clear thought per slide. Cut filler.",
 } as const;
 
+// A format's slides in order. Formats without a saved structure get a hook,
+// content slides and a CTA, sized by `count` (the creation popup's override).
+export function slideStructure(
+  format: Format,
+  count = format.slideCount,
+): StructureSlide[] {
+  if (format.structure?.length) return format.structure;
+  const length = Math.max(2, Math.min(10, Math.round(count || 2)));
+  return Array.from({ length }, (_, index) => {
+    const role = index === 0 ? "hook" : index === length - 1 ? "cta" : "body";
+    return {
+      label: role === "body" ? `Content ${index}` : roleNames[role],
+      role,
+      text: "",
+    };
+  });
+}
+
 export function templateFor(format: Format, role: Slide["role"]): RoleTemplate {
   return (
     format.templates?.[role] ?? {
@@ -32,7 +57,7 @@ export function templateFor(format: Format, role: Slide["role"]): RoleTemplate {
       font: "default",
       color: format.ink,
       style: "outline",
-      size: 14,
+      size: 12,
       position: "center",
       width: 100,
       align: "center",
@@ -40,7 +65,6 @@ export function templateFor(format: Format, role: Slide["role"]): RoleTemplate {
       imageZoom: 1,
       imageX: 50,
       imageY: 50,
-      direction: "",
     }
   );
 }
@@ -75,6 +99,8 @@ export function templateSlide(
       size: template.size,
       color: template.color,
       style: template.style,
+      styleColor: template.styleColor,
+      roundness: template.roundness,
       align: template.align,
       width,
       x: (240 - width) / 2,
