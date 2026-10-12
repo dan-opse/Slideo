@@ -102,6 +102,38 @@ function NumberControl({
     </Control>
   );
 }
+// A slider in the editor dock, laid out like format customize: the value
+// rides in the label. onStart marks a new drag so it undoes as one step.
+function SliderControl({
+  label,
+  value,
+  min,
+  max,
+  step = 1,
+  onStart,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onStart: () => void;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <Control label={label}>
+      <Slider
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onPointerDown={onStart}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+    </Control>
+  );
+}
 function Tool({
   label,
   children,
@@ -129,6 +161,12 @@ function Tool({
     </button>
   );
 }
+// Lock onto grid snaps text-box moves to 10-unit cells (24 across the
+// 240-wide canvas), the same cells on every slide.
+const GRID_STEP = 10;
+const snapTo = (value: number, max: number) =>
+  clamp(Math.round(value / GRID_STEP) * GRID_STEP, 0, max);
+const SNAP_KEY = "slideo.lockToGrid";
 const localDate = (date: string) =>
   date
     ? new Date(
@@ -168,6 +206,13 @@ export default function SlideshowEditor({
   const [zoom, setZoom] = useState(100);
   const [compact, setCompact] = useState(false);
   const [grid, setGrid] = useState(false);
+  const [lockGrid, setLockGrid] = useState(() => {
+    try {
+      return sessionStorage.getItem(SNAP_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [sheet, setSheet] = useState<
@@ -178,6 +223,12 @@ export default function SlideshowEditor({
   const root = useRef<HTMLDivElement>(null);
   const sheetOpener = useRef<HTMLElement | null>(null);
   const track = useRef<HTMLDivElement>(null);
+  const centerSlide = useRef(() => {});
+  // Changes that share a gesture key (one slider drag) undo as one step.
+  const gesture = useRef("");
+  // Whether a dropdown or color picker was open when the pointer went down,
+  // so a backdrop click that dismisses one does not also close the editor.
+  const popoverOpen = useRef(false);
   const latest = useRef({ close: () => {}, step: (_offset: number) => {} });
   const dirty = JSON.stringify(post) !== JSON.stringify(saved);
   const slide = post.slides[selected] ?? post.slides[0];
@@ -205,9 +256,11 @@ export default function SlideshowEditor({
       layer.x + layer.width > 240.1)
   );
 
-  function update(next: Post) {
+  function update(next: Post, key = "") {
     if (immutable || busy) return;
-    setPast((items) => [...items.slice(-49), post]);
+    if (!key || key !== gesture.current)
+      setPast((items) => [...items.slice(-49), post]);
+    gesture.current = key;
     setFuture([]);
     setPost(next);
   }
@@ -221,22 +274,31 @@ export default function SlideshowEditor({
       .join("\n\n");
     return { ...slide, title: text.slice(0, 180), body: text.slice(180, 630) };
   }
-  function patch(data: Partial<Slide>) {
-    update({
-      ...post,
-      slides: post.slides.map((item, index) =>
-        index === selected ? withCopy({ ...item, ...data }) : item,
-      ),
-    });
+  function patch(data: Partial<Slide>, key?: string) {
+    update(
+      {
+        ...post,
+        slides: post.slides.map((item, index) =>
+          index === selected ? withCopy({ ...item, ...data }) : item,
+        ),
+      },
+      key,
+    );
   }
-  function patchLayer(data: Partial<PhotoText>) {
+  function patchLayer(data: Partial<PhotoText>, key?: string) {
     if (!layer) return;
-    patch({
-      textLayers: layers.map((item) =>
-        item.id === layer.id ? { ...item, ...data } : item,
-      ),
-    });
+    patch(
+      {
+        textLayers: layers.map((item) =>
+          item.id === layer.id ? { ...item, ...data } : item,
+        ),
+      },
+      key,
+    );
   }
+  const startGesture = () => {
+    gesture.current = "";
+  };
   function choose(index: number) {
     setSelected(clamp(index, 0, post.slides.length - 1));
     setLayerId("");
@@ -300,10 +362,34 @@ export default function SlideshowEditor({
         }
       }
     }
+    // Registered before any popover opens, so this runs ahead of the
+    // dropdown's and color picker's own outside-click listeners.
+    function pointer() {
+      popoverOpen.current = !!document.querySelector(
+        ".dropdown-menu, .color-picker",
+      );
+    }
+    // A mousedown on the dimmed area (around the window, or around an open
+    // sheet) closes like X. Clicks in the window or a sheet have another
+    // target, and portalled popovers are outside this element entirely.
+    const backdrop = root.current;
+    function outside(event: MouseEvent) {
+      const target = event.target as HTMLElement;
+      if (popoverOpen.current) return;
+      if (
+        target === backdrop ||
+        target.classList.contains("photo-sheet-backdrop")
+      )
+        latest.current.close();
+    }
     document.addEventListener("keydown", key);
+    document.addEventListener("pointerdown", pointer, true);
+    backdrop?.addEventListener("mousedown", outside);
     return () => {
       document.body.style.overflow = oldOverflow;
       document.removeEventListener("keydown", key);
+      document.removeEventListener("pointerdown", pointer, true);
+      backdrop?.removeEventListener("mousedown", outside);
       previous?.focus();
     };
   }, []);
@@ -331,17 +417,38 @@ export default function SlideshowEditor({
     return () => window.removeEventListener("beforeunload", beforeUnload);
   }, [dirty]);
   useEffect(() => {
-    const container = track.current;
-    const target = container?.children[selected] as HTMLElement | undefined;
-    if (container && target)
-      container.scrollTo({
-        left:
-          target.offsetLeft -
-          container.offsetLeft -
-          (container.clientWidth - target.clientWidth) / 2,
-        behavior: "instant",
-      });
+    // Frames are positioned inside the track, so offsetLeft is already
+    // measured from its scroll origin.
+    centerSlide.current = () => {
+      const container = track.current;
+      const target = container?.children[selected] as HTMLElement | undefined;
+      if (container && target)
+        container.scrollTo({
+          left:
+            target.offsetLeft -
+            (container.clientWidth - target.clientWidth) / 2,
+          behavior: "instant",
+        });
+    };
+    centerSlide.current();
   }, [selected, editing, compact, zoom]);
+  // Frame widths follow the stage height, which settles after the first
+  // paint (a new slideshow's dock, fonts and images), so center again
+  // whenever the track or a frame changes size.
+  useEffect(() => {
+    const container = track.current;
+    if (!container) return;
+    const observer = new ResizeObserver(() => centerSlide.current());
+    observer.observe(container);
+    for (const frame of Array.from(container.children)) observer.observe(frame);
+    return () => observer.disconnect();
+  }, [post.slides.length, editing]);
+  function toggleLockGrid(value: boolean) {
+    setLockGrid(value);
+    try {
+      sessionStorage.setItem(SNAP_KEY, value ? "1" : "0");
+    } catch {}
+  }
   async function action(task: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -386,6 +493,7 @@ export default function SlideshowEditor({
     onToast("Images and caption downloaded.");
   }
   function restore(next: Post) {
+    gesture.current = "";
     setPost(next);
     setSelected((index) => Math.min(index, next.slides.length - 1));
     setLayerId("");
@@ -440,11 +548,17 @@ export default function SlideshowEditor({
               clamp(target.height + dy, 12, height - target.y),
             ),
           }
-        : {
-            ...target,
-            x: Math.round(clamp(target.x + dx, 0, 240 - target.width)),
-            y: Math.round(clamp(target.y + dy, 0, height - target.height)),
-          };
+        : lockGrid
+          ? {
+              ...target,
+              x: snapTo(target.x + dx, 240 - target.width),
+              y: snapTo(target.y + dy, height - target.height),
+            }
+          : {
+              ...target,
+              x: Math.round(clamp(target.x + dx, 0, 240 - target.width)),
+              y: Math.round(clamp(target.y + dy, 0, height - target.height)),
+            };
       nextPost = {
         ...initialPost,
         slides: initialPost.slides.map((item, index) =>
@@ -467,6 +581,7 @@ export default function SlideshowEditor({
       if (element.hasPointerCapture(event.pointerId))
         element.releasePointerCapture(event.pointerId);
       if (moved) {
+        gesture.current = "";
         setPast((items) => [...items.slice(-49), initialPost]);
         setFuture([]);
       }
@@ -499,6 +614,11 @@ export default function SlideshowEditor({
         }
         onDrag={editing && selected === index ? drag : undefined}
         grid={editing && grid}
+        snap={
+          editing && lockGrid && selected === index && tab === "text"
+            ? GRID_STEP
+            : undefined
+        }
       />
     ) : editing ? (
       <div
@@ -746,30 +866,37 @@ export default function SlideshowEditor({
                 <Download size={17} />
                 Download images
               </button>
-              {!approved && !deleted && (
-                <button
-                  className="photo-action"
-                  disabled={busy}
-                  onClick={() =>
-                    action(async () => {
-                      await request("render", {
-                        id: saved.id,
-                        revision: saved.revision,
-                      });
-                      const next = await request("approve", {
-                        id: saved.id,
-                        revision: saved.revision,
-                      });
-                      setPost(next);
-                      setSaved(next);
-                      await onSaved();
-                      onToast("Slideshow approved for export.");
-                    })
-                  }
-                >
-                  <ShieldCheck size={17} />
-                  Approve slideshow
+              {approved ? (
+                <button className="photo-action approved" disabled>
+                  <Check size={17} />
+                  Approved
                 </button>
+              ) : (
+                !deleted && (
+                  <button
+                    className="photo-action"
+                    disabled={busy}
+                    onClick={() =>
+                      action(async () => {
+                        await request("render", {
+                          id: saved.id,
+                          revision: saved.revision,
+                        });
+                        const next = await request("approve", {
+                          id: saved.id,
+                          revision: saved.revision,
+                        });
+                        setPost(next);
+                        setSaved(next);
+                        await onSaved();
+                        onToast("Slideshow approved for export.");
+                      })
+                    }
+                  >
+                    <ShieldCheck size={17} />
+                    Approve slideshow
+                  </button>
+                )
               )}
               <button
                 className="photo-action"
@@ -1124,10 +1251,12 @@ export default function SlideshowEditor({
                             min={0}
                             max={100}
                             value={layer.roundness ?? DEFAULT_ROUNDNESS}
+                            onPointerDown={startGesture}
                             onChange={(event) =>
-                              patchLayer({
-                                roundness: Number(event.target.value),
-                              })
+                              patchLayer(
+                                { roundness: Number(event.target.value) },
+                                "roundness",
+                              )
                             }
                           />
                         </Control>
@@ -1173,14 +1302,26 @@ export default function SlideshowEditor({
                           value={layer.x}
                           min={0}
                           max={240 - layer.width}
-                          onChange={(x) => patchLayer({ x })}
+                          step={lockGrid ? GRID_STEP : 1}
+                          onChange={(x) =>
+                            patchLayer({
+                              x: lockGrid ? snapTo(x, 240 - layer.width) : x,
+                            })
+                          }
                         />
                         <NumberControl
                           label="Y"
                           value={layer.y}
                           min={0}
                           max={height - layer.height}
-                          onChange={(y) => patchLayer({ y })}
+                          step={lockGrid ? GRID_STEP : 1}
+                          onChange={(y) =>
+                            patchLayer({
+                              y: lockGrid
+                                ? snapTo(y, height - layer.height)
+                                : y,
+                            })
+                          }
                         />
                         <Tool
                           label="Center text box"
@@ -1267,6 +1408,19 @@ export default function SlideshowEditor({
                     >
                       <Plus size={13} /> Add text
                     </button>
+                    <label className="photo-toggle">
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        aria-checked={lockGrid}
+                        checked={lockGrid}
+                        onChange={(event) =>
+                          toggleLockGrid(event.target.checked)
+                        }
+                      />
+                      <i aria-hidden="true" />
+                      Lock onto grid
+                    </label>
                     {layer && (
                       <button
                         onClick={() =>
@@ -1413,33 +1567,41 @@ export default function SlideshowEditor({
                         onChange={(imageFit) => patch({ imageFit })}
                       />
                     </Control>
-                    <NumberControl
-                      label="Image zoom %"
+                    <SliderControl
+                      label={`Image zoom · ${Math.round((slide.imageZoom ?? 1) * 100)}%`}
                       value={(slide.imageZoom ?? 1) * 100}
                       min={100}
                       max={300}
-                      onChange={(value) => patch({ imageZoom: value / 100 })}
+                      onStart={startGesture}
+                      onChange={(value) =>
+                        patch({ imageZoom: value / 100 }, "imageZoom")
+                      }
                     />
-                    <NumberControl
-                      label="Position X %"
+                    <SliderControl
+                      label={`Horizontal · ${Math.round(slide.imageX ?? 50)}%`}
                       value={slide.imageX ?? 50}
                       min={0}
                       max={100}
-                      onChange={(imageX) => patch({ imageX })}
+                      onStart={startGesture}
+                      onChange={(imageX) => patch({ imageX }, "imageX")}
                     />
-                    <NumberControl
-                      label="Position Y %"
+                    <SliderControl
+                      label={`Vertical · ${Math.round(slide.imageY ?? 50)}%`}
                       value={slide.imageY ?? 50}
                       min={0}
                       max={100}
-                      onChange={(imageY) => patch({ imageY })}
+                      onStart={startGesture}
+                      onChange={(imageY) => patch({ imageY }, "imageY")}
                     />
-                    <NumberControl
-                      label="Darkening %"
+                    <SliderControl
+                      label={`Darkening · ${Math.round(slide.overlay * 100)}%`}
                       value={Math.round(slide.overlay * 100)}
                       min={0}
                       max={85}
-                      onChange={(value) => patch({ overlay: value / 100 })}
+                      onStart={startGesture}
+                      onChange={(value) =>
+                        patch({ overlay: value / 100 }, "overlay")
+                      }
                     />
                     <Control label="Background">
                       <ColorPicker

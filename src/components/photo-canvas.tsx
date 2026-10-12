@@ -59,6 +59,7 @@ export const PhotoCanvas = memo(function PhotoCanvas({
   onSelect,
   onDrag,
   grid = false,
+  snap,
 }: {
   slide: Slide;
   aspect: Post["aspect"];
@@ -73,6 +74,8 @@ export const PhotoCanvas = memo(function PhotoCanvas({
     resize: boolean,
   ) => void;
   grid?: boolean;
+  // Cell size of the grid text boxes snap to, drawn when set.
+  snap?: number;
 }) {
   const height = canvasHeight(aspect);
   const slots = imageSlots(slide, height).flatMap((slot) => {
@@ -138,6 +141,23 @@ export const PhotoCanvas = memo(function PhotoCanvas({
               }}
             />
           ))}
+        {!!snap && (
+          <path
+            stroke="#fff"
+            strokeOpacity=".22"
+            strokeWidth=".3"
+            d={[
+              ...Array.from(
+                { length: Math.ceil(240 / snap) - 1 },
+                (_, i) => `M${(i + 1) * snap} 0V${height}`,
+              ),
+              ...Array.from(
+                { length: Math.ceil(height / snap) - 1 },
+                (_, i) => `M0 ${(i + 1) * snap}H240`,
+              ),
+            ].join("")}
+          />
+        )}
         {grid && (
           <g
             stroke="#fff"
