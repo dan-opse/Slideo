@@ -49,7 +49,7 @@ import {
 } from "@/lib/photo-layout";
 import { PhotoCanvas, usePhotoFonts } from "./photo-canvas";
 import { NumberInput } from "./number-input";
-import { arrowStep } from "./keys";
+import { arrowStep, slideScroll } from "./keys";
 import { Dropdown } from "./ui/dropdown";
 import { Slider } from "./ui/slider";
 import { canvasItems, fontItems, positionItems, styleItems } from "./options";
@@ -329,7 +329,10 @@ export default function SlideshowEditor({
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
   }, [dirty]);
+  const scrolledSlide = useRef(selected);
   useEffect(() => {
+    const stepped = scrolledSlide.current !== selected;
+    scrolledSlide.current = selected;
     const container = track.current;
     const target = container?.children[selected] as HTMLElement | undefined;
     if (container && target)
@@ -338,7 +341,7 @@ export default function SlideshowEditor({
           target.offsetLeft -
           container.offsetLeft -
           (container.clientWidth - target.clientWidth) / 2,
-        behavior: "instant",
+        behavior: slideScroll(stepped),
       });
   }, [selected, editing, compact, zoom]);
   async function action(task: () => Promise<void>) {

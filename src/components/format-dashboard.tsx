@@ -55,7 +55,7 @@ import { collectionsOf, defaultBrandId, libraryAssets } from "@/lib/defaults";
 import { describeIssues } from "@/lib/errors";
 import { PhotoCanvas, usePhotoFonts } from "./photo-canvas";
 import { NumberInput } from "./number-input";
-import { arrowStep } from "./keys";
+import { arrowStep, slideScroll } from "./keys";
 import { RenderFallback } from "./render-fallback";
 import { Dropdown } from "./ui/dropdown";
 import { Slider } from "./ui/slider";
@@ -273,7 +273,10 @@ export default function FormatDashboard({
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
+  const scrolledSlot = useRef(current);
   useEffect(() => {
+    const stepped = scrolledSlot.current !== current;
+    scrolledSlot.current = current;
     const container = previewTrack.current;
     const selected = container?.querySelector<HTMLElement>(
       `[data-index="${current}"]`,
@@ -281,7 +284,7 @@ export default function FormatDashboard({
     if (container && selected && !grid)
       container.scrollTo({
         left: selected.offsetLeft - container.offsetLeft - 22,
-        behavior: "instant",
+        behavior: slideScroll(stepped),
       });
   }, [current, grid, page, fonts]);
   const patch = (change: Partial<Format>) => {
