@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import type { Asset, Brand, Format, Post } from "../src/lib/schema";
-const folder = mkdtempSync(path.join(tmpdir(), "fieldwork-hardening-test-"));
+import { seedSamplePost } from "./sample-post";
+const folder = mkdtempSync(path.join(tmpdir(), "slideo-hardening-test-"));
 process.env.STUDIO_DATA_DIR = folder;
 delete process.env.OPENAI_API_KEY;
 const store = await import("../src/lib/store");
@@ -20,6 +21,7 @@ const { photoSlide } = await import("../src/lib/photo-layout");
 const { describeIssues } = await import("../src/lib/errors");
 const { formatSchema } = await import("../src/lib/schema");
 const { NextRequest } = await import("next/server");
+const sample = seedSamplePost(store);
 after(() => {
   store.database().close();
   rmSync(folder, { recursive: true, force: true });
@@ -409,7 +411,7 @@ test("cropped photo slots keep the visible part of the image", async () => {
     .toBuffer();
   writeFileSync(path.join(folder, "assets", "half.jpg"), half);
   const font = await photoFont();
-  const base = store.list<Post>("post").at(-1)!.slides[0];
+  const base = sample.slides[0];
   for (const [imageX, channel] of [
     [0, 0],
     [100, 2],
@@ -457,7 +459,7 @@ test("module import does not create a workspace and concurrent first boots seed 
   await Promise.all(Array.from({ length: 6 }, () => run(shared, boot)));
   const count = await run(
     shared,
-    'const s = await import("./src/lib/store.ts"); console.log(s.list("post").length);',
+    'const s = await import("./src/lib/store.ts"); console.log(s.list("format").map((f) => f.id).join(), s.database().prepare("SELECT COUNT(*) AS n FROM audit WHERE action=?").get("format.tiktok_photo_added").n);',
   );
-  assert.equal(count.trim(), "1");
+  assert.equal(count.trim(), "tiktok-photo 1");
 });

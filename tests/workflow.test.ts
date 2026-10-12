@@ -4,7 +4,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import sharp from "sharp";
-const folder = mkdtempSync(path.join(tmpdir(), "fieldwork-test-"));
+import { seedSamplePost } from "./sample-post";
+const folder = mkdtempSync(path.join(tmpdir(), "slideo-test-"));
 process.env.STUDIO_DATA_DIR = folder;
 const store = await import("../src/lib/store");
 const { renderAll, renderSlide } = await import("../src/lib/render");
@@ -16,20 +17,20 @@ const { formatSchema, postSchema } = await import("../src/lib/schema");
 const { assertExactSlideCount, ideasSchema } = await import("../src/lib/ai");
 const { assertPublicWebsiteUrl, readWebsite } =
   await import("../src/lib/website");
-const original = store.list<import("../src/lib/schema").Post>("post")[0];
+const original = seedSamplePost(store);
 after(() => {
   store.database().close();
   rmSync(folder, { recursive: true, force: true });
 });
-test("fresh workspaces include the Pobi brand brief", () => {
+test("fresh workspaces start with a blank brand brief", () => {
   const brand = store.get<import("../src/lib/schema").Brand>(
     "brand",
     "demo-brand",
   );
-  assert.equal(brand.name, "Pobi");
-  assert.equal(brand.destination, "https://www.pobi.bet");
-  assert.match(brand.product, /expected value/);
-  assert.match(brand.prohibited, /Never promise wins/);
+  assert.equal(brand.name, "My brand");
+  assert.equal(brand.product, "");
+  assert.equal(brand.facts, "");
+  assert.equal(brand.destination, "");
 });
 test("new formats are capped at 10 while legacy posts can retain more slides", () => {
   const format = store.list<import("../src/lib/schema").Format>("format")[0];
@@ -61,7 +62,10 @@ test("legacy format defaults above 10 migrate and record an audit event", () => 
   store.put("format", format);
 });
 test("manual create uses the modal count and preserves a legacy fallback", async () => {
-  const format = store.list<import("../src/lib/schema").Format>("format")[0];
+  const format = store.get<import("../src/lib/schema").Format>(
+    "format",
+    "tiktok-photo",
+  );
   const base = {
     action: "create",
     brandId: "demo-brand",

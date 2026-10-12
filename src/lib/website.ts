@@ -141,7 +141,7 @@ export async function readWebsite(
         redirect: "manual",
         headers: {
           accept: "text/html,application/xhtml+xml",
-          "user-agent": "FieldworkWebsiteReader/1.0",
+          "user-agent": "SlideoWebsiteReader/1.0",
         },
         signal,
       });

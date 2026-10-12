@@ -7,7 +7,8 @@ import sharp from "sharp";
 import type { Brand, Format, Post, Asset } from "../src/lib/schema";
 import { formatSchema } from "../src/lib/schema";
 import { templateFor, imageSlots } from "../src/lib/format-template";
-const folder = mkdtempSync(path.join(tmpdir(), "fieldwork-format-test-"));
+import { seedSamplePost } from "./sample-post";
+const folder = mkdtempSync(path.join(tmpdir(), "slideo-format-test-"));
 process.env.STUDIO_DATA_DIR = folder;
 process.env.OPENAI_API_KEY = "test-key";
 process.env.AI_DAILY_CALL_LIMIT = "50";
@@ -18,7 +19,7 @@ const { renderAll } = await import("../src/lib/render");
 const { assertNewHooks, hookWritingInput, slideshowWritingInput } =
   await import("../src/lib/ai");
 const brand = store.get<Brand>("brand", "demo-brand");
-const original = store.list<Post>("post")[0];
+const original = seedSamplePost(store);
 const base = store.get<Format>("format", "tiktok-photo");
 const format: Format = {
   ...base,
@@ -182,8 +183,8 @@ test("hook prompts omit slideshow tone and caption instructions", () => {
   assert.match(JSON.stringify(writingInput), /BODY_ONLY_SENTINEL/);
   assert.doesNotMatch(JSON.stringify(writingInput), /HOOK_ONLY_SENTINEL/);
   const source = {
-    url: "https://www.pobi.bet/",
-    title: "Pobi",
+    url: "https://example.com/",
+    title: "Example",
     content: "Website facts",
   };
   assert.deepEqual(hookWritingInput(brand, format, "", source).website, source);
