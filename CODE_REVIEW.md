@@ -6,6 +6,8 @@ This is an actionable handoff for the next coding agent. The review found **12 i
 
 **Follow-up status:** Fixes reviewed on branch `worktree-code-review-fixes` at `52e22d806364e6d7224879f2b4d55ff36d72efc6`. **10 findings are addressed; R05 and R06 remain partially fixed.** All three High findings are addressed. Two Medium rendering gaps remain: cached JPEGs bypass the new validation, and background-style blobs can extend beyond the canvas without an error. See [remaining gaps](#remaining-gaps--follow-up-at-52e22d8).
 
+**Gap fixes:** Both remaining gaps are fixed in `dc22d57`, so all 12 findings are now addressed. See each gap's completion note.
+
 The original descriptions and reproduction steps below describe the baseline commit. Completion notes and the follow-up verification distinguish what changed. Browser checks recorded by the fixing agent were not independently repeated during the follow-up.
 
 ## Instructions for the fixing agent
@@ -35,20 +37,20 @@ Local verification used Node v24.21.0; CI specifies Node 22. Runtime reproductio
 
 ## Prioritized checklist
 
-| ID  | Severity | Status          | Finding                                                          |
-| --- | -------- | --------------- | ---------------------------------------------------------------- |
-| R01 | High     | Addressed       | Generated text geometry can violate the post schema              |
-| R02 | High     | Addressed       | Stale clients export or publish a different revision             |
-| R03 | High     | Addressed       | Concurrent brand and format saves lose newer changes             |
-| R04 | Medium   | Addressed       | Website DNS validation does not bind the actual connection       |
-| R05 | Medium   | Partially fixed | Horizontal glyph overflow is not rejected                        |
-| R06 | Medium   | Partially fixed | Unsupported glyphs silently render substitute shapes             |
-| R07 | Medium   | Addressed       | Hidden image references allow blank-slide approval               |
-| R08 | Medium   | Addressed       | Photo drafts ignore format color defaults without role templates |
-| R09 | Medium   | Addressed       | Format previews select removed images                            |
-| R10 | Medium   | Addressed       | Large components duplicate request and dialog responsibilities   |
-| R11 | Low      | Addressed       | Obsolete editor and landing-page CSS remains loaded              |
-| R12 | Low      | Addressed       | Unexpected server errors discard diagnostic information          |
+| ID  | Severity | Status    | Finding                                                          |
+| --- | -------- | --------- | ---------------------------------------------------------------- |
+| R01 | High     | Addressed | Generated text geometry can violate the post schema              |
+| R02 | High     | Addressed | Stale clients export or publish a different revision             |
+| R03 | High     | Addressed | Concurrent brand and format saves lose newer changes             |
+| R04 | Medium   | Addressed | Website DNS validation does not bind the actual connection       |
+| R05 | Medium   | Addressed | Horizontal glyph overflow is not rejected                        |
+| R06 | Medium   | Addressed | Unsupported glyphs silently render substitute shapes             |
+| R07 | Medium   | Addressed | Hidden image references allow blank-slide approval               |
+| R08 | Medium   | Addressed | Photo drafts ignore format color defaults without role templates |
+| R09 | Medium   | Addressed | Format previews select removed images                            |
+| R10 | Medium   | Addressed | Large components duplicate request and dialog responsibilities   |
+| R11 | Low      | Addressed | Obsolete editor and landing-page CSS remains loaded              |
+| R12 | Low      | Addressed | Unexpected server errors discard diagnostic information          |
 
 ### Tech debt and correctness
 
@@ -112,7 +114,7 @@ The code checks DNS answers for public addresses, discards those answers, then p
 
 #### R05 — Medium: Horizontal glyph overflow is not rejected
 
-- [ ] Partially fixed in `61d9a62`; reopened after follow-up at `52e22d8`. The original `W` reproduction now reports overflow and `renderPhotoSlide` returns 422; ink drawn above the canvas is rejected; ordinary wrapping passes. Background-style bounds are still omitted, and cached JPEGs can skip render validation. Complete both [remaining gaps](#remaining-gaps--follow-up-at-52e22d8) before closing this finding.
+- [x] Fixed in `61d9a62`; the two follow-up gaps were fixed and verified in `dc22d57`. The original `W` reproduction now reports overflow and `renderPhotoSlide` returns 422; ink drawn above the canvas is rejected; ordinary wrapping passes. Follow-up: background-style bounds are now included, and cached JPEGs are validated before use (see both [remaining gaps](#remaining-gaps--follow-up-at-52e22d8)).
 
 **Locations:** `src/lib/photo-layout.ts:94` and `:132`, `src/lib/photo-render.ts:105`.
 
@@ -126,7 +128,7 @@ Long-word splitting still accepts an individual character wider than the availab
 
 #### R06 — Medium: Unsupported glyphs silently render substitute shapes
 
-- [ ] Partially fixed in `61d9a62`; reopened after follow-up at `52e22d8`. Fresh rendering reports emoji and CJK copy ("The font can’t draw …") and returns 422; zero-width and variation-selector characters are dropped; supported punctuation and accents pass. An old cached emoji JPEG still bypasses these checks and can be approved. Complete [gap A](#gap-a--medium-cached-jpegs-bypass-the-new-validation-r05r06) before closing this finding.
+- [x] Fixed in `61d9a62`; the cached-JPEG gap was fixed and verified in `dc22d57`. Fresh rendering reports emoji and CJK copy ("The font can’t draw …") and returns 422; zero-width and variation-selector characters are dropped; supported punctuation and accents pass. Follow-up: an old cached emoji JPEG is now rejected before it can be served, approved or exported (see [gap A](#gap-a--medium-cached-jpegs-bypass-the-new-validation-r05r06)).
 
 **Location:** `src/lib/photo-layout.ts:121`.
 
@@ -234,13 +236,15 @@ Independently rerun against `52e22d8` using Node v24.21.0:
 - `npm run build`: passed.
 - `node_modules/.bin/prettier --check 'src/**/*.{ts,tsx,css}' 'tests/**/*.ts'`: passed.
 
+**Gap fixes in `dc22d57`**, rerun after the fix: `npm run typecheck`, `npm run lint`, `npm test` (**63 tests passed**, including the two new gap regressions), `npm run build`, and the Prettier check all pass. Both gap reproductions fail on `52e22d8` and pass on `dc22d57`.
+
 API callers now send `expected` for brand/format updates, `revision` for publication, and `?revision=` for exports. Client callers were inspected for those changes. Browser interactions and live provider calls were not independently retested. The dependency audit was not rerun during this follow-up. Additional isolated reproductions confirmed both gaps below despite the green checks. No application code was changed during verification.
 
 ### Remaining gaps — follow-up at `52e22d8`
 
 #### Gap A — Medium: Cached JPEGs bypass the new validation (R05/R06)
 
-- [ ] Validate cached revisions and cover the renderer transition with a regression test.
+- [x] Fixed and verified in `dc22d57`. `renderSlide` runs the shared `assertPhotoRenderable` text checks (the same `textProblem` used by fresh renders, preview and the editor) **before** it reads any cached photo JPEG. `PHOTO_RENDER_VERSION` is now `4` because R06 changed what gets drawn (invisible characters), so the disk files and browser `?v=` URLs move to the new renderer together. Approval hashes are never rewritten: a retained approved revision whose fresh v4 render matches its stored hashes still exports, while one whose pixels differ gets the existing "Rendered files changed. Review and approve again." conflict and needs the owner to approve it again. Regression test "R05/R06 gap A" starts from an unchecked baseline-style emoji JPEG cached under both `v3` and the current version, plus an approval recorded from those bytes. `renderSlide` throws 422 (`Slide 1: The font can’t draw “😀”…`); the `approve` endpoint returns 422 and the post stays `needs_review`; export of the pre-recorded approval returns 422. The same post with valid text approves, re-serves identical cached bytes and exports with HTTP 200.
 
 **Current locations:** `src/lib/render.ts:33`, `src/lib/photo-layout.ts:10`, and `src/app/api/studio/route.ts:501`.
 
@@ -260,7 +264,7 @@ This was independently reproduced using the actual baseline and branch renderers
 
 #### Gap B — Medium: Background-style blobs can clip past the canvas (R05)
 
-- [ ] Include background-path bounds in text validation and add an edge-case regression test.
+- [x] Fixed and verified in `dc22d57`. `effectBounds` now includes, for `box` layers, every non-blank line's row extent plus the background padding. `backgroundPath` and the bounds check share one `backgroundPadding` helper. Neighbouring-line merging and corner rounding never extend a blob past those extremes. Because preview, editor warnings and export all call `textProblem`, they agree. Regression test "R05 gap B": the reproduction layer now reports "Text is drawn past the edge of the slide…" and `renderPhotoSlide` returns 422; the left, top and bottom edges (including a box ending exactly at the canvas bottom) are rejected too. The same glyph in `plain` style, and ordinary in-bounds background layers, still pass and render.
 
 **Current locations:** `src/lib/photo-layout.ts:169` (`effectBounds`), `:195` (`textProblem`), and `:223` (`backgroundPath`).
 
