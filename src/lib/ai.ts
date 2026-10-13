@@ -2,12 +2,12 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import {
-  database,
   dailyLimit,
   dailyUsage,
-  now,
+  recordAiAttempt,
   uid,
   transaction,
+  updateAiAttempt,
   StudioError,
 } from "./store";
 import type { Brand, Format } from "./schema";
@@ -116,17 +116,15 @@ type UsageRecord = {
   outputTokens?: number;
 };
 
-function reserveAttempt() {
+async function reserveAttempt() {
   const id = uid();
-  transaction(() => {
-    if (dailyUsage() >= dailyLimit())
+  await transaction(async () => {
+    if ((await dailyUsage()) >= dailyLimit())
       throw new StudioError(
         "Daily AI call limit reached. Manual editing is still available.",
         429,
       );
-    database()
-      .prepare("INSERT INTO ai_attempts VALUES(?,?,?,NULL)")
-      .run(id, now(), "reserved");
+    await recordAiAttempt(id);
   });
   return id;
 }
@@ -142,14 +140,12 @@ function usageOf(response: OpenAI.Responses.Response): UsageRecord {
   };
 }
 
-function recordAttempt(
+async function recordAttempt(
   id: string,
   status: "received" | "complete" | "failed",
   metadata: Record<string, unknown>,
 ) {
-  database()
-    .prepare("UPDATE ai_attempts SET status=?,usage=? WHERE id=?")
-    .run(status, JSON.stringify(metadata), id);
+  await updateAiAttempt(id, status, JSON.stringify(metadata));
 }
 
 function providerError(error: unknown): StudioError {
@@ -179,9 +175,9 @@ function providerError(error: unknown): StudioError {
 
 // Checked before slow preparation (such as reading a website) so a missing key
 // or exhausted limit fails fast. The attempt itself is reserved later.
-export function assertAiAvailable() {
+export async function assertAiAvailable() {
   clientAndModel();
-  if (dailyUsage() >= dailyLimit())
+  if ((await dailyUsage()) >= dailyLimit())
     throw new StudioError(
       "Daily AI call limit reached. Manual editing is still available.",
       429,
@@ -231,7 +227,7 @@ export async function generateCopy(
   selectedHook?: string,
 ) {
   const { client, model } = clientAndModel();
-  const id = reserveAttempt();
+  const id = await reserveAttempt();
   const baseMetadata = {
     provider: "openai",
     operation: "slideshow",
@@ -271,7 +267,10 @@ export async function generateCopy(
       responseId: response.id,
       usage: usageOf(response),
     };
-    recordAttempt(id, "received", { ...baseMetadata, ...responseMetadata });
+    await recordAttempt(id, "received", {
+      ...baseMetadata,
+      ...responseMetadata,
+    });
     if (response.status !== "completed")
       throw new StudioError(
         "OpenAI returned an incomplete slideshow. No post was created.",
@@ -301,7 +300,7 @@ export async function generateCopy(
         "OpenAI repeated an existing hook. Try a more specific topic.",
         409,
       );
-    recordAttempt(id, "complete", {
+    await recordAttempt(id, "complete", {
       ...baseMetadata,
       ...responseMetadata,
       success: true,
@@ -309,7 +308,7 @@ export async function generateCopy(
     return copy;
   } catch (error) {
     const normalized = providerError(error);
-    recordAttempt(id, "failed", {
+    await recordAttempt(id, "failed", {
       ...baseMetadata,
       ...responseMetadata,
       success: false,
@@ -326,7 +325,7 @@ export async function generateHooks(
   source?: WebsiteSource,
 ) {
   const { client, model } = clientAndModel();
-  const id = reserveAttempt();
+  const id = await reserveAttempt();
   const baseMetadata = {
     provider: "openai",
     operation: "format_hooks",
@@ -357,7 +356,10 @@ export async function generateHooks(
       text: { format: zodTextFormat(hooksSchema, "format_hooks") },
     });
     responseMetadata = { responseId: response.id, usage: usageOf(response) };
-    recordAttempt(id, "received", { ...baseMetadata, ...responseMetadata });
+    await recordAttempt(id, "received", {
+      ...baseMetadata,
+      ...responseMetadata,
+    });
     if (response.status !== "completed")
       throw new StudioError(
         "OpenAI returned incomplete hooks. Your saved hooks are unchanged.",
@@ -369,7 +371,7 @@ export async function generateHooks(
         422,
       );
     const hooks = assertNewHooks(response.output_parsed, format.hooks ?? []);
-    recordAttempt(id, "complete", {
+    await recordAttempt(id, "complete", {
       ...baseMetadata,
       ...responseMetadata,
       success: true,
@@ -377,7 +379,7 @@ export async function generateHooks(
     return hooks;
   } catch (error) {
     const normalized = providerError(error);
-    recordAttempt(id, "failed", {
+    await recordAttempt(id, "failed", {
       ...baseMetadata,
       ...responseMetadata,
       success: false,
@@ -389,7 +391,7 @@ export async function generateHooks(
 
 export async function generateIdeas(brand: Brand, source: WebsiteSource) {
   const { client, model } = clientAndModel();
-  const id = reserveAttempt();
+  const id = await reserveAttempt();
   const baseMetadata = {
     provider: "openai",
     operation: "website_ideas",
@@ -431,7 +433,10 @@ export async function generateIdeas(brand: Brand, source: WebsiteSource) {
       responseId: response.id,
       usage: usageOf(response),
     };
-    recordAttempt(id, "received", { ...baseMetadata, ...responseMetadata });
+    await recordAttempt(id, "received", {
+      ...baseMetadata,
+      ...responseMetadata,
+    });
     if (response.status !== "completed")
       throw new StudioError(
         "OpenAI returned incomplete ideas. Try again.",
@@ -440,7 +445,7 @@ export async function generateIdeas(brand: Brand, source: WebsiteSource) {
     if (wasRefused(response))
       throw new StudioError("OpenAI declined this website idea request.", 422);
     const parsed = ideasSchema.parse(response.output_parsed);
-    recordAttempt(id, "complete", {
+    await recordAttempt(id, "complete", {
       ...baseMetadata,
       ...responseMetadata,
       success: true,
@@ -448,7 +453,7 @@ export async function generateIdeas(brand: Brand, source: WebsiteSource) {
     return parsed.ideas;
   } catch (error) {
     const normalized = providerError(error);
-    recordAttempt(id, "failed", {
+    await recordAttempt(id, "failed", {
       ...baseMetadata,
       ...responseMetadata,
       success: false,

@@ -1,6 +1,6 @@
 # Slideo
 
-Slideo is a private, local slideshow studio inspired by ReelFarm's core workflow. It creates editable photo-carousels from reusable formats, requires approval for each exact revision, and exports an ordered TikTok-ready package for manual publishing.
+Slideo is a private slideshow studio inspired by ReelFarm's core workflow. It creates editable photo-carousels from reusable formats, requires approval for each exact revision, and exports an ordered TikTok-ready package for manual publishing. Run it on your own computer, or host it on Vercel with Supabase so other people can sign up and use it.
 
 ## Run it
 
@@ -9,9 +9,32 @@ npm install
 npm run dev
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000), or the port printed in your terminal if 3000 is occupied. The server binds to loopback and API routes reject non-local hosts and cross-origin requests.
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000), or the port printed in your terminal if 3000 is occupied. Without Supabase settings the studio is single-user: the server binds to loopback, API routes reject non-local hosts and cross-origin requests, and data lives in an embedded Postgres ([PGlite](https://pglite.dev)) under `data/`. No database server is needed.
 
 The app works without an AI provider. To enable website ideas and AI writing, copy `.env.example` to `.env.local`, set `OPENAI_API_KEY`, and restart the server. `OPENAI_MODEL` defaults to `gpt-5.6-luna` and can be overridden. API keys stay on the server.
+
+## Host it on Vercel
+
+A hosted studio has accounts: people sign up with an email and password, and each account sees only its own brands, formats, slideshows, images, and AI allowance. Supabase provides the database (Postgres), sign-in, and file storage.
+
+1. **Create a Supabase project.** In **Authentication → URL Configuration**, set the Site URL to your Vercel domain and add `https://<your-domain>/auth/confirm` to the redirect URLs. Supabase's built-in email sender is rate-limited; add your own SMTP provider under **Authentication → Emails** before inviting many people.
+2. **Collect the settings** (listed in `.env.example`):
+   - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (or the legacy anon key) from **Project Settings → API Keys**.
+   - `SUPABASE_SERVICE_ROLE_KEY` (the secret key), used only by the server for file storage.
+   - `DATABASE_URL`: **Connect → Transaction pooler** connection string (port 6543), with your database password.
+3. **Import the repository into Vercel**, add those settings plus `OPENAI_API_KEY` as environment variables, and deploy.
+
+On first use the studio creates its tables (with row-level security on, so Supabase's public API can't read them) and a private `studio` storage bucket. Images upload from the browser straight to storage through signed URLs, so they aren't limited by Vercel's 4.5 MB request size; downloads of approved packages use short-lived storage links for the same reason.
+
+`AI_DAILY_CALL_LIMIT` applies to each account. Vercel's free Hobby plan is for non-commercial use; charging for the studio needs a Pro plan.
+
+To copy an existing local workspace into a hosted account, run the import with the hosted settings and the account's Supabase user id (from **Authentication → Users**):
+
+```bash
+node --env-file=.env.production.local --import tsx scripts/import-sqlite.ts ./data <user-id>
+```
+
+The same script, without settings or a user id, moves a workspace from the original SQLite release (`data/studio.sqlite`) into the current local studio.
 
 ## Current workflow
 
@@ -52,13 +75,15 @@ TikTok Sans v4.000 is from [TikTok’s official font repository](https://github.
 
 ## Data and backups
 
-All user data is stored under `data/` by default:
+A local studio stores everything under `data/` by default:
 
-- `data/studio.sqlite` holds briefs, formats, posts, immutable revisions, approvals, metrics, and audit events.
-- `data/assets/` holds normalized uploaded images.
-- `data/renders/` holds revision-specific JPEGs.
+- `data/pglite/` is the embedded Postgres database: briefs, formats, posts, immutable revisions, approvals, metrics, and audit events.
+- `data/files/local/assets/` holds normalized uploaded images.
+- `data/files/local/renders/` holds revision-specific JPEGs.
 
 Stop the app and back up the entire `data/` directory together. Set `STUDIO_DATA_DIR` to use a different location.
+
+A hosted studio keeps the same records in Supabase Postgres, scoped by account, and files in the `studio` storage bucket under each account's folder. Supabase's free plan keeps no backups; a paid plan adds daily backups.
 
 ## Checks
 
@@ -71,4 +96,4 @@ npm run build
 
 CI (`.github/workflows/ci.yml`) runs these plus a Prettier check and `npm audit --omit=dev` on every pull request. Linting uses [oxlint](https://oxc.rs), because `typescript-eslint` does not support TypeScript 7.
 
-The first release covers local authoring and manual export. Recurring generation, MP4 export, cloud authentication, and publishing-provider integration remain later milestones in [PRD.md](./PRD.md).
+Recurring generation, MP4 export, and publishing-provider integration remain later milestones in [PRD.md](./PRD.md).

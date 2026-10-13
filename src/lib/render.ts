@@ -1,7 +1,6 @@
 import sharp, { type OverlayOptions } from "sharp";
-import { access, readFile, writeFile, mkdir } from "node:fs/promises";
-import path from "node:path";
-import { dataDir, digest, get, revisionContent, StudioError } from "./store";
+import { digest, fileKey, get, revisionContent, StudioError } from "./store";
+import { files } from "./files";
 import type { Asset } from "./schema";
 import { assertPhotoRenderable, renderPhotoSlide } from "./photo-render";
 import { PHOTO_RENDER_VERSION } from "./photo-layout";
@@ -22,37 +21,33 @@ export async function renderSlide(
   revision: number,
   index: number,
 ) {
-  const content = revisionContent(postId, revision);
+  const content = await revisionContent(postId, revision);
   const s = content.slides[index];
   if (!s) throw new StudioError("Slide not found", 404);
-  const file = path.join(
-    dataDir,
+  const key = fileKey(
     "renders",
     `${postId}-${revision}-${index}${s.design === "photo" ? `-photo-v${PHOTO_RENDER_VERSION}` : ""}.jpg`,
   );
   if (s.design === "photo")
     await assertPhotoRenderable(s, content.aspect, index);
-  try {
-    return await readFile(file);
-  } catch {}
+  const cached = await files().read(key);
+  if (cached) return cached;
   if (s.design === "photo") {
     const buffer = await renderPhotoSlide(s, content.aspect, index);
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, buffer);
+    await files().write(key, buffer, "image/jpeg");
     return buffer;
   }
   const width = 1080,
     height = content.aspect === "portrait" ? 1350 : 1920;
   let base: Buffer;
   if (s.assetId) {
-    get<Asset>("asset", s.assetId);
-    const source = path.join(dataDir, "assets", `${s.assetId}.jpg`);
-    await access(source).catch(() => {
+    await get<Asset>("asset", s.assetId);
+    const source = await files().read(fileKey("assets", `${s.assetId}.jpg`));
+    if (!source)
       throw new StudioError(
         `Slide ${index + 1}: its background image is missing from your library. Choose another image.`,
         422,
       );
-    });
     base = await sharp(source)
       .resize(width, height, { fit: "cover", position: "attention" })
       .jpeg()
@@ -119,12 +114,11 @@ export async function renderSlide(
     .composite(layers)
     .jpeg({ quality: 92, mozjpeg: true })
     .toBuffer();
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, buffer);
+  await files().write(key, buffer, "image/jpeg");
   return buffer;
 }
 export async function renderAll(id: string, revision: number) {
-  const c = revisionContent(id, revision);
+  const c = await revisionContent(id, revision);
   const buffers: Buffer[] = [];
   for (let i = 0; i < c.slides.length; i++)
     buffers.push(await renderSlide(id, revision, i));

@@ -33,8 +33,8 @@ const { pinnedLookup, pinnedTransport, readWebsite } =
   await import("../src/lib/website");
 const { logUnexpected } = await import("../src/lib/log");
 const { NextRequest } = await import("next/server");
-after(() => {
-  store.database().close();
+after(async () => {
+  await store.closeStore();
   rmSync(folder, { recursive: true, force: true });
 });
 
@@ -93,9 +93,9 @@ const exportAt = (id: string, revision: number) =>
 
 test("R01: oversized template text is fitted to valid geometry on both aspects", async () => {
   for (const aspect of ["story", "portrait"] as const) {
-    const base = preset();
+    const base = await preset();
     const id = `tiny-box-${aspect}`;
-    store.put<Format>("format", {
+    await store.put<Format>("format", {
       ...base,
       id,
       aspect,
@@ -175,8 +175,11 @@ test("R02: stale export and publication requests conflict instead of substitutin
     url: "https://www.tiktok.com/@me/photo/10",
   });
   assert.equal(stalePublish.status, 409);
-  assert.equal(store.get<Post>("post", first.id).status, "approved");
-  assert.equal(store.get<Post>("post", first.id).publishedUrl, undefined);
+  assert.equal((await store.get<Post>("post", first.id)).status, "approved");
+  assert.equal(
+    (await store.get<Post>("post", first.id)).publishedUrl,
+    undefined,
+  );
   const missing = await action({
     action: "publish",
     id: first.id,
@@ -202,13 +205,13 @@ test("R02: stale export and publication requests conflict instead of substitutin
   });
   assert.equal(staleCorrection.status, 409);
   assert.equal(
-    store.get<Post>("post", first.id).publishedUrl,
+    (await store.get<Post>("post", first.id)).publishedUrl,
     "https://www.tiktok.com/@me/photo/10",
   );
 });
 
 test("R03: stale brand and format saves conflict and keep the first save", async () => {
-  const brand = store.get<Brand>("brand", "demo-brand");
+  const brand = await store.get<Brand>("brand", "demo-brand");
   const expected = brand.version ?? 0;
   const a = await action({
     action: "brand",
@@ -223,7 +226,7 @@ test("R03: stale brand and format saves conflict and keep the first save", async
   });
   assert.equal(b.status, 409);
   assert.match(b.body.error, /another window/);
-  const stored = store.get<Brand>("brand", brand.id);
+  const stored = await store.get<Brand>("brand", brand.id);
   assert.equal(stored.facts, "Verified fact from window A");
   assert.equal(stored.name, brand.name);
   const unversioned = await action({
@@ -239,8 +242,8 @@ test("R03: stale brand and format saves conflict and keep the first save", async
   assert.equal(fresh.status, 200, fresh.body.error);
   assert.equal(fresh.body.facts, "Verified fact from window A");
 
-  store.put<Format>("format", { ...preset(), id: "versioned" });
-  const format = store.get<Format>("format", "versioned");
+  await store.put<Format>("format", { ...(await preset()), id: "versioned" });
+  const format = await store.get<Format>("format", "versioned");
   const first = await action({
     action: "format",
     data: { ...format, hooks: ["Hook from window A"] },
@@ -253,7 +256,7 @@ test("R03: stale brand and format saves conflict and keep the first save", async
     expected: 0,
   });
   assert.equal(stale.status, 409);
-  assert.deepEqual(store.get<Format>("format", "versioned").hooks, [
+  assert.deepEqual((await store.get<Format>("format", "versioned")).hooks, [
     "Hook from window A",
   ]);
   const created = await action({
@@ -419,11 +422,15 @@ test("R05/R06 gap A: cached JPEGs cannot skip render validation", async () => {
   )
     .jpeg()
     .toBuffer();
-  mkdirSync(path.join(folder, "renders"), { recursive: true });
+  mkdirSync(path.join(folder, "files", "local", "renders"), {
+    recursive: true,
+  });
   for (const version of [3, PHOTO_RENDER_VERSION])
     writeFileSync(
       path.join(
         folder,
+        "files",
+        "local",
         "renders",
         `${post.id}-${post.revision}-0-photo-v${version}.jpg`,
       ),
@@ -439,7 +446,7 @@ test("R05/R06 gap A: cached JPEGs cannot skip render validation", async () => {
     revision: post.revision,
   });
   assert.equal(approval.status, 422);
-  assert.equal(store.get<Post>("post", post.id).status, "needs_review");
+  assert.equal((await store.get<Post>("post", post.id)).status, "needs_review");
   // An approval recorded from the cached bytes before validation existed
   // cannot be exported either.
   const others = await Promise.all(
@@ -447,7 +454,7 @@ test("R05/R06 gap A: cached JPEGs cannot skip render validation", async () => {
       .slice(1)
       .map((_, i) => renderSlide(post.id, post.revision, i + 1)),
   );
-  store.approvePost(
+  await store.approvePost(
     post.id,
     post.revision,
     [cached, ...others].map(store.digest),
@@ -566,8 +573,8 @@ test("R07: hidden grid references cannot approve a blank slide", async () => {
 });
 
 test("R08: photo formats without role templates keep their saved colors", async () => {
-  store.put<Format>("format", {
-    ...preset(),
+  await store.put<Format>("format", {
+    ...(await preset()),
     id: "red",
     color: "#ff0000",
     ink: "#000000",
@@ -581,7 +588,7 @@ test("R08: photo formats without role templates keep their saved colors", async 
   const font = await photoFont();
   const preview = templateSlide(
     { ...post.slides[0], textLayers: undefined },
-    store.get<Format>("format", "red"),
+    await store.get<Format>("format", "red"),
     { default: font, semibold: font, regular: font },
     [],
     0,
@@ -599,7 +606,7 @@ test("R08: photo formats without role templates keep their saved colors", async 
 
 test("R09: format previews never select removed images", async () => {
   const font = await photoFont();
-  const base = preset();
+  const base = await preset();
   const format: Format = {
     ...base,
     templates: {
@@ -658,7 +665,10 @@ test("R12: unexpected failures log diagnostics without changing responses", asyn
     const asset = await upload("#aa00aa", "Corrupt");
     const post = (await create("tiktok-photo", { collection: "Corrupt" }))
       .body as Post;
-    writeFileSync(path.join(folder, "assets", `${asset.id}.jpg`), "not a jpeg");
+    writeFileSync(
+      path.join(folder, "files", "local", "assets", `${asset.id}.jpg`),
+      "not a jpeg",
+    );
     lines.length = 0;
     const response = await renderRoute(
       new NextRequest(

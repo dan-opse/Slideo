@@ -18,13 +18,14 @@ process.env.OPENAI_API_KEY = "test-key";
 process.env.AI_DAILY_CALL_LIMIT = "50";
 const store = await import("../src/lib/store");
 const { POST } = await import("../src/app/api/studio/route");
+const { driver } = await import("../src/lib/db");
 const { NextRequest } = await import("next/server");
 const { renderAll } = await import("../src/lib/render");
 const { assertNewHooks, hookWritingInput, slideshowWritingInput } =
   await import("../src/lib/ai");
-const brand = store.get<Brand>("brand", "demo-brand");
-const original = seedSamplePost(store);
-const base = store.get<Format>("format", "tiktok-photo");
+const brand = await store.get<Brand>("brand", "demo-brand");
+const original = await seedSamplePost(store);
+const base = await store.get<Format>("format", "tiktok-photo");
 const format: Format = {
   ...base,
   id: "test-format",
@@ -55,7 +56,7 @@ const format: Format = {
   },
 };
 // The API only updates formats that exist; start from a stored copy of the preset.
-store.put<Format>("format", { ...base, id: format.id });
+await store.put<Format>("format", { ...base, id: format.id });
 const request = (body: Record<string, unknown>) =>
   POST(
     new NextRequest("http://localhost:3000/api/studio", {
@@ -68,8 +69,8 @@ const request = (body: Record<string, unknown>) =>
       body: JSON.stringify(body),
     }),
   );
-after(() => {
-  store.database().close();
+after(async () => {
+  await store.closeStore();
   rmSync(folder, { recursive: true, force: true });
 });
 
@@ -81,7 +82,7 @@ test("format settings persist without altering existing posts or revisions", asy
   });
   assert.equal(response.status, 200);
   assert.deepEqual((await response.json()).templates, format.templates);
-  assert.deepEqual(store.get<Post>("post", original.id), original);
+  assert.deepEqual(await store.get<Post>("post", original.id), original);
   assert.doesNotThrow(() => formatSchema.parse(base));
   assert.throws(() =>
     formatSchema.parse({ ...format, hooks: ["x".repeat(181)] }),
@@ -98,18 +99,18 @@ test("format settings persist without altering existing posts or revisions", asy
 });
 
 test("manual creation snapshots role templates and preserves popup count and selected hook", async () => {
-  mkdirSync(path.join(folder, "assets"), { recursive: true });
+  mkdirSync(path.join(folder, "files", "local", "assets"), { recursive: true });
   for (const [index, color] of ["#ff0000", "#0000ff"].entries()) {
     const id = `format-image-${index}`;
     writeFileSync(
-      path.join(folder, "assets", `${id}.jpg`),
+      path.join(folder, "files", "local", "assets", `${id}.jpg`),
       await sharp({
         create: { width: 200, height: 200, channels: 3, background: color },
       })
         .jpeg()
         .toBuffer(),
     );
-    store.put<Asset>("asset", {
+    await store.put<Asset>("asset", {
       id,
       name: id,
       collection: "test-images",
@@ -148,24 +149,24 @@ test("manual creation snapshots role templates and preserves popup count and sel
     .raw()
     .toBuffer();
   assert.notDeepEqual(top, bottom, "Each grid slot must use its own image");
-  const noRights = store.get<Asset>(
+  const noRights = await store.get<Asset>(
     "asset",
     post.slides[0].additionalAssetIds![0],
   );
-  store.put("asset", { ...noRights, rights: "" });
-  assert.throws(
+  await store.put("asset", { ...noRights, rights: "" });
+  await assert.rejects(
     () => store.approvePost(post.id, post.revision, hashes),
     /usage rights/,
   );
-  store.put("asset", noRights);
-  const approved = store.approvePost(post.id, post.revision, hashes);
+  await store.put("asset", noRights);
+  const approved = await store.approvePost(post.id, post.revision, hashes);
   await request({
     action: "format",
     data: { ...format, slideCount: 3 },
-    expected: store.get<Format>("format", format.id).version,
+    expected: (await store.get<Format>("format", format.id)).version,
   });
-  assert.deepEqual(store.assertApproval(approved), hashes);
-  assert.equal(store.get<Post>("post", post.id).slides.length, 8);
+  assert.deepEqual(await store.assertApproval(approved), hashes);
+  assert.equal((await store.get<Post>("post", post.id)).slides.length, 8);
   const slots = imageSlots(
     {
       ...post.slides[0],
@@ -259,7 +260,7 @@ test("OpenAI hooks use the prompt without fetching a website and record normaliz
     });
   };
   try {
-    const before = store.dailyUsage();
+    const before = await store.dailyUsage();
     const response = await request({
       action: "hooks",
       brandId: brand.id,
@@ -274,20 +275,19 @@ test("OpenAI hooks use the prompt without fetching a website and record normaliz
     );
     assert.equal((await response.json()).hooks.length, 10);
     assert.equal(calls, 1);
-    assert.equal(store.dailyUsage(), before + 1);
-    const row = store
-      .database()
-      .prepare(
-        "SELECT status,usage FROM ai_attempts ORDER BY rowid DESC LIMIT 1",
-      )
-      .get() as { status: string; usage: string };
+    assert.equal(await store.dailyUsage(), before + 1);
+    const [row] = await (
+      await driver()
+    ).query<{ status: string; usage: string }>(
+      "SELECT status,usage FROM ai_attempts ORDER BY at DESC LIMIT 1",
+    );
     assert.equal(row.status, "complete");
     const meta = JSON.parse(row.usage);
     assert.equal(meta.operation, "format_hooks");
     assert.equal(meta.usage.cachedInputTokens, 10);
     assert.equal(meta.usage.reasoningTokens, 5);
     assert.deepEqual(
-      store.get<Format>("format", format.id).hooks,
+      (await store.get<Format>("format", format.id)).hooks,
       format.hooks,
     );
     const unsafe = await request({
@@ -370,8 +370,8 @@ test("AI slideshow preserves a chosen hook even if the provider rewrites it", as
 
 test("failed hook requests preserve formats and count attempts; the daily limit prevents calls", async () => {
   const fetchBefore = globalThis.fetch;
-  const saved = store.get<Format>("format", format.id);
-  const before = store.dailyUsage();
+  const saved = await store.get<Format>("format", format.id);
+  const before = await store.dailyUsage();
   let calls = 0;
   try {
     for (const failure of ["invalid", "refusal", "incomplete", "quota"]) {
@@ -419,11 +419,11 @@ test("failed hook requests preserve formats and count attempts; the daily limit 
         prompt: "A prompt",
       });
       assert.ok(response.status >= 400);
-      assert.deepEqual(store.get<Format>("format", format.id), saved);
+      assert.deepEqual(await store.get<Format>("format", format.id), saved);
     }
-    assert.equal(store.dailyUsage(), before + 4);
+    assert.equal(await store.dailyUsage(), before + 4);
     assert.equal(calls, 4);
-    process.env.AI_DAILY_CALL_LIMIT = String(store.dailyUsage());
+    process.env.AI_DAILY_CALL_LIMIT = String(await store.dailyUsage());
     const limited = await request({
       action: "hooks",
       brandId: brand.id,
@@ -451,7 +451,7 @@ test("a saved slide structure sets the order, styles, text and count of new draf
       { label: "#1", role: "body", text: "" },
     ],
   };
-  store.put("format", structured);
+  await store.put("format", structured);
   const saved = await request({
     action: "format",
     data: structured,

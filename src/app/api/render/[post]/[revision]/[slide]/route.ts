@@ -1,24 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
-import { guard } from "@/lib/guard";
+import { authorize } from "@/lib/auth";
 import { renderSlide } from "@/lib/render";
-import { StudioError } from "@/lib/store";
+import { StudioError, withAccount } from "@/lib/store";
 import { logUnexpected } from "@/lib/log";
+export const maxDuration = 60;
 export async function GET(
   req: NextRequest,
   {
     params,
   }: { params: Promise<{ post: string; revision: string; slide: string }> },
 ) {
-  const denied = guard(req);
-  if (denied) return denied;
+  const who = await authorize(req);
+  if (who instanceof NextResponse) return who;
   let p: { post: string; revision: string; slide: string } | undefined;
   try {
     p = await params;
-    const revision = Number(p.revision),
+    const post = p.post,
+      revision = Number(p.revision),
       slide = Number(p.slide);
     if (!Number.isInteger(revision) || !Number.isInteger(slide))
       throw new StudioError("Slide not found", 404);
-    const data = await renderSlide(p.post, revision, slide);
+    const data = await withAccount(who, () =>
+      renderSlide(post, revision, slide),
+    );
     return new NextResponse(new Uint8Array(data), {
       headers: {
         "Content-Type": "image/jpeg",

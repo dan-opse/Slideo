@@ -10,7 +10,8 @@ import {
   photoTextSvg,
 } from "./photo-layout";
 import type { PhotoText, PostContent, Slide } from "./schema";
-import { dataDir, StudioError } from "./store";
+import { fileKey, StudioError } from "./store";
+import { files } from "./files";
 import { imageSlots } from "./format-template";
 
 const fonts = new Map<string, Promise<Font>>();
@@ -42,14 +43,12 @@ async function slotImage(
   slot: ReturnType<typeof imageSlots>[number],
   index: number,
 ) {
-  const data = await readFile(
-    path.join(dataDir, "assets", `${slot.id}.jpg`),
-  ).catch(() => {
+  const data = await files().read(fileKey("assets", `${slot.id}.jpg`));
+  if (!data)
     throw new StudioError(
       `Slide ${index + 1}: one of its images is missing from your library. Choose another image.`,
       422,
     );
-  });
   const meta = await sharp(data).metadata();
   const width = meta.width!,
     height = meta.height!;

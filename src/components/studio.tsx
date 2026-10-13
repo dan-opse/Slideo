@@ -14,6 +14,7 @@ import {
   ChevronRight,
   ImagePlus,
   Loader2,
+  LogOut,
   Plus,
   Settings2,
   ShieldCheck,
@@ -190,15 +191,39 @@ export default function Studio() {
             <Settings2 size={18} />
             Settings
           </button>
-          <div className="profile">
-            <span className="profile-avatar">D</span>
-            <div>
-              <strong>Daniel’s workspace</strong>
-              <small>
-                <i /> Local & private
-              </small>
+          {state.settings.hosted ? (
+            <div className="profile">
+              <span className="profile-avatar">
+                {(state.settings.email || "?").charAt(0).toUpperCase()}
+              </span>
+              <div>
+                <strong>{state.settings.email || "Your workspace"}</strong>
+                <small>
+                  <i /> Private to your account
+                </small>
+              </div>
+              <form method="post" action="/auth/signout">
+                <button
+                  className="icon-button profile-signout"
+                  type="submit"
+                  aria-label="Sign out"
+                  title="Sign out"
+                >
+                  <LogOut size={16} />
+                </button>
+              </form>
             </div>
-          </div>
+          ) : (
+            <div className="profile">
+              <span className="profile-avatar">D</span>
+              <div>
+                <strong>Daniel’s workspace</strong>
+                <small>
+                  <i /> Local & private
+                </small>
+              </div>
+            </div>
+          )}
         </div>
       </aside>
       <div className="main-shell">

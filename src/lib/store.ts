@@ -1,8 +1,8 @@
-import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
-import path from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { visibleAssetIds } from "./format-template";
+import { closeDatabase, driver, type Runner } from "./db";
+import { hosted, LOCAL_USER, type Account } from "./auth";
 import type {
   Asset,
   Brand,
@@ -11,39 +11,57 @@ import type {
   PostContent,
   StudioState,
 } from "./schema";
-export const dataDir = path.resolve(
-  /* turbopackIgnore: true */ process.env.STUDIO_DATA_DIR || "./data",
-);
-let instance: DatabaseSync | undefined;
-// Opened on first use rather than at import, so `next build` (which imports
-// route modules to collect page data) never creates or seeds a workspace.
-export function database() {
-  if (instance) return instance;
-  mkdirSync(dataDir, { recursive: true });
-  instance = new DatabaseSync(path.join(dataDir, "studio.sqlite"));
-  // busy_timeout must come first: switching to WAL needs a lock that a
-  // concurrently starting process may hold.
-  instance.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;
-CREATE TABLE IF NOT EXISTS entities(kind TEXT NOT NULL,id TEXT NOT NULL,json TEXT NOT NULL,PRIMARY KEY(kind,id));
-CREATE TABLE IF NOT EXISTS revisions(post_id TEXT NOT NULL,revision INTEGER NOT NULL,json TEXT NOT NULL,hash TEXT NOT NULL,PRIMARY KEY(post_id,revision));
-CREATE TABLE IF NOT EXISTS approvals(post_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,hash TEXT NOT NULL,render_hashes TEXT NOT NULL,created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS audit(id TEXT PRIMARY KEY,action TEXT NOT NULL,entity TEXT NOT NULL,at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS ai_attempts(id TEXT PRIMARY KEY,at TEXT NOT NULL,status TEXT NOT NULL,usage TEXT);
-`);
-  // One writer seeds; concurrent first boots wait on the lock, then see the data.
-  transaction(() => {
-    seed();
-    addPhotoPreset();
-  });
-  return instance;
+export { dataDir } from "./db";
+
+// Every query runs for one account. Route handlers enter its scope through
+// withAccount; inside a transaction, queries also share its connection.
+type Scope = { account: Account; tx?: Runner };
+const scope = new AsyncLocalStorage<Scope>();
+function current(): Scope {
+  const active = scope.getStore();
+  if (active) return active;
+  // Only the single-user local studio may act without a signed-in account.
+  if (hosted()) throw new Error("No signed-in account for this operation.");
+  return { account: { id: LOCAL_USER, email: null } };
 }
+export const userId = () => current().account.id;
+export const account = () => current().account;
+// Every stored file lives under its account's folder.
+export const fileKey = (
+  area: "assets" | "renders" | "uploads" | "exports",
+  name: string,
+) => `${userId()}/${area}/${name}`;
+
+const seeded = new Set<string>();
+export async function withAccount<T>(
+  who: Account,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return scope.run({ account: who }, async () => {
+    await ensureWorkspace();
+    return fn();
+  });
+}
+async function runner() {
+  return current().tx ?? (await driver());
+}
+async function query<T = Record<string, unknown>>(
+  text: string,
+  params: unknown[] = [],
+) {
+  // Outside a request (scripts, tests) the local studio seeds on first use.
+  if (!scope.getStore()) await ensureWorkspace();
+  return (await runner()).query<T>(text, params);
+}
+
 export const uid = () => randomUUID();
 export const now = () => new Date().toISOString();
-export function list<T>(kind: string): T[] {
+export async function list<T>(kind: string): Promise<T[]> {
   return (
-    database()
-      .prepare("SELECT json FROM entities WHERE kind=? ORDER BY rowid DESC")
-      .all(kind) as { json: string }[]
+    await query<{ json: string }>(
+      "SELECT json FROM entities WHERE user_id=$1 AND kind=$2 ORDER BY seq DESC",
+      [userId(), kind],
+    )
   ).map((r) => JSON.parse(r.json));
 }
 const missing: Record<string, string> = {
@@ -52,19 +70,19 @@ const missing: Record<string, string> = {
   post: "That slideshow no longer exists. Reload the studio.",
   asset: "That image is not in your library. Choose another image.",
 };
-export function get<T>(kind: string, id: string): T {
-  const row = database()
-    .prepare("SELECT json FROM entities WHERE kind=? AND id=?")
-    .get(kind, id) as { json: string } | undefined;
+export async function get<T>(kind: string, id: string): Promise<T> {
+  const [row] = await query<{ json: string }>(
+    "SELECT json FROM entities WHERE user_id=$1 AND kind=$2 AND id=$3",
+    [userId(), kind, id],
+  );
   if (!row) throw new StudioError(missing[kind] ?? "Not found.", 404);
   return JSON.parse(row.json);
 }
-export function put<T extends { id: string }>(kind: string, item: T) {
-  database()
-    .prepare(
-      "INSERT INTO entities VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET json=excluded.json",
-    )
-    .run(kind, item.id, JSON.stringify(item));
+export async function put<T extends { id: string }>(kind: string, item: T) {
+  await query(
+    "INSERT INTO entities(user_id,kind,id,json) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,kind,id) DO UPDATE SET json=excluded.json",
+    [userId(), kind, item.id, JSON.stringify(item)],
+  );
 }
 const changed: Record<string, string> = {
   brand: "This brand brief changed in another window. Reload before saving.",
@@ -73,25 +91,31 @@ const changed: Record<string, string> = {
 // Brands and formats are saved whole. An update names the version it was
 // edited from; anything else would silently erase another window's changes.
 // Call inside a transaction so the check and the write are atomic.
-export function nextVersion(
+export async function nextVersion(
   kind: "brand" | "format",
   id: string | undefined,
   expected: number | undefined,
 ) {
   if (!id) return 1;
-  const current = get<{ version?: number }>(kind, id).version ?? 0;
+  const current = (await get<{ version?: number }>(kind, id)).version ?? 0;
   if (expected !== current) throw new StudioError(changed[kind], 409);
   return current + 1;
 }
-export function remove(kind: string, id: string) {
-  database()
-    .prepare("DELETE FROM entities WHERE kind=? AND id=?")
-    .run(kind, id);
+export async function remove(kind: string, id: string) {
+  await query("DELETE FROM entities WHERE user_id=$1 AND kind=$2 AND id=$3", [
+    userId(),
+    kind,
+    id,
+  ]);
 }
-export function audit(action: string, id: string) {
-  database()
-    .prepare("INSERT INTO audit VALUES(?,?,?,?)")
-    .run(uid(), action, id, now());
+export async function audit(action: string, id: string) {
+  await query("INSERT INTO audit VALUES($1,$2,$3,$4,$5)", [
+    uid(),
+    userId(),
+    action,
+    id,
+    now(),
+  ]);
 }
 export class StudioError extends Error {
   constructor(
@@ -101,23 +125,17 @@ export class StudioError extends Error {
     super(message);
   }
 }
-let depth = 0;
 // Nested calls join the outermost transaction; its rollback undoes everything.
-export function transaction<T>(fn: () => T): T {
-  if (depth > 0) return fn();
-  const db = database();
-  db.exec("BEGIN IMMEDIATE");
-  depth++;
-  try {
-    const result = fn();
-    db.exec("COMMIT");
-    return result;
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
-  } finally {
-    depth--;
-  }
+// Each account's writes are serialized, as a single SQLite writer once did.
+export async function transaction<T>(fn: () => Promise<T>): Promise<T> {
+  const active = current();
+  if (active.tx) return fn();
+  return (await driver()).transaction(async (tx) => {
+    await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      active.account.id,
+    ]);
+    return scope.run({ ...active, tx }, fn);
+  });
 }
 export function digest(value: string | Buffer) {
   return createHash("sha256").update(value).digest("hex");
@@ -148,13 +166,13 @@ export function contentOf(post: Post): PostContent {
   ];
   return content;
 }
-export function savePost(
+export async function savePost(
   content: PostContent,
   id?: string,
   expected?: number,
-): Post {
-  return transaction(() => {
-    const old = id ? get<Post>("post", id) : undefined;
+): Promise<Post> {
+  return transaction(async () => {
+    const old = id ? await get<Post>("post", id) : undefined;
     if (old && old.revision !== expected)
       throw new StudioError(
         "This post changed in another window. Reload before saving.",
@@ -173,29 +191,40 @@ export function savePost(
       createdAt: old?.createdAt || now(),
       updatedAt: now(),
     };
-    put("post", post);
-    const db = database();
-    db.prepare("INSERT INTO revisions VALUES(?,?,?,?)").run(
+    await put("post", post);
+    await query("INSERT INTO revisions VALUES($1,$2,$3,$4,$5)", [
+      userId(),
       post.id,
       post.revision,
       JSON.stringify(content),
       digest(JSON.stringify(content)),
-    );
-    db.prepare("DELETE FROM approvals WHERE post_id=?").run(post.id);
-    audit(old ? "post.revised" : "post.created", post.id);
+    ]);
+    await query("DELETE FROM approvals WHERE user_id=$1 AND post_id=$2", [
+      userId(),
+      post.id,
+    ]);
+    await audit(old ? "post.revised" : "post.created", post.id);
     return post;
   });
 }
-export function revisionContent(id: string, revision: number): PostContent {
-  const row = database()
-    .prepare("SELECT json FROM revisions WHERE post_id=? AND revision=?")
-    .get(id, revision) as { json: string } | undefined;
+export async function revisionContent(
+  id: string,
+  revision: number,
+): Promise<PostContent> {
+  const [row] = await query<{ json: string }>(
+    "SELECT json FROM revisions WHERE user_id=$1 AND post_id=$2 AND revision=$3",
+    [userId(), id, revision],
+  );
   if (!row) throw new StudioError("Revision not found", 404);
   return JSON.parse(row.json);
 }
-export function approvePost(id: string, revision: number, hashes: string[]) {
-  return transaction(() => {
-    const post = get<Post>("post", id);
+export async function approvePost(
+  id: string,
+  revision: number,
+  hashes: string[],
+) {
+  return transaction(async () => {
+    const post = await get<Post>("post", id);
     if (
       post.revision !== revision ||
       post.status === "archived" ||
@@ -207,7 +236,7 @@ export function approvePost(id: string, revision: number, hashes: string[]) {
       );
     if (hashes.length !== post.slides.length)
       throw new StudioError("Render every slide before approval.");
-    post.slides.forEach((slide, index) => {
+    for (const [index, slide] of post.slides.entries()) {
       const images = visibleAssetIds(slide);
       // Photo slides may be image-only; editorial slides are built around a heading.
       const empty =
@@ -221,33 +250,38 @@ export function approvePost(id: string, revision: number, hashes: string[]) {
             ? `Slide ${index + 1} is empty. Add text or a background image before approval.`
             : `Slide ${index + 1} needs a heading before approval.`,
         );
-      if (images.some((id) => !get<Asset>("asset", id).rights.trim()))
-        throw new StudioError(
-          `Slide ${index + 1}: record usage rights for its images in Assets before approval.`,
-        );
-    });
-    database()
-      .prepare("INSERT OR REPLACE INTO approvals VALUES(?,?,?,?,?)")
-      .run(
+      for (const image of images)
+        if (!(await get<Asset>("asset", image)).rights.trim())
+          throw new StudioError(
+            `Slide ${index + 1}: record usage rights for its images in Assets before approval.`,
+          );
+    }
+    await query(
+      "INSERT INTO approvals VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(user_id,post_id) DO UPDATE SET revision=excluded.revision,hash=excluded.hash,render_hashes=excluded.render_hashes,created_at=excluded.created_at",
+      [
+        userId(),
         id,
         revision,
         digest(JSON.stringify(contentOf(post))),
         JSON.stringify(hashes),
         now(),
-      );
+      ],
+    );
     post.status = "approved";
-    put("post", post);
-    audit("export.approved", id);
+    await put("post", post);
+    await audit("export.approved", id);
     return post;
   });
 }
-export function assertApproval(post: Post) {
-  const a = database()
-    .prepare(
-      "SELECT revision,hash,render_hashes FROM approvals WHERE post_id=?",
-    )
-    .get(post.id) as
-    { revision: number; hash: string; render_hashes: string } | undefined;
+export async function assertApproval(post: Post) {
+  const [a] = await query<{
+    revision: number;
+    hash: string;
+    render_hashes: string;
+  }>(
+    "SELECT revision,hash,render_hashes FROM approvals WHERE user_id=$1 AND post_id=$2",
+    [userId(), post.id],
+  );
   if (
     !a ||
     !["approved", "published"].includes(post.status) ||
@@ -260,9 +294,9 @@ export function assertApproval(post: Post) {
     );
   return JSON.parse(a.render_hashes) as string[];
 }
-export function archivePost(id: string) {
-  return transaction(() => {
-    const post = get<Post>("post", id);
+export async function archivePost(id: string) {
+  return transaction(async () => {
+    const post = await get<Post>("post", id);
     // Published posts carry the URL and results; archiving would hide them for good.
     if (post.status === "published")
       throw new StudioError(
@@ -271,72 +305,118 @@ export function archivePost(id: string) {
       );
     if (post.status === "archived") return post;
     post.status = "archived";
-    put("post", post);
-    database().prepare("DELETE FROM approvals WHERE post_id=?").run(id);
-    audit("post.archived", id);
+    await put("post", post);
+    await query("DELETE FROM approvals WHERE user_id=$1 AND post_id=$2", [
+      userId(),
+      id,
+    ]);
+    await audit("post.archived", id);
     return post;
   });
 }
-export function restorePost(id: string) {
-  return transaction(() => {
-    const post = get<Post>("post", id);
+export async function restorePost(id: string) {
+  return transaction(async () => {
+    const post = await get<Post>("post", id);
     if (post.status !== "archived")
       throw new StudioError("Only deleted slideshows can be restored.", 409);
     post.status = "needs_review";
-    put("post", post);
-    audit("post.restored", id);
+    await put("post", post);
+    await audit("post.restored", id);
     return post;
   });
 }
 // Revisions are immutable, so an image used by any revision must keep its file.
-export function assetInUse(id: string) {
-  return !!database()
-    .prepare("SELECT 1 FROM revisions WHERE instr(json, ?) > 0 LIMIT 1")
-    .get(JSON.stringify(id));
-}
-export function dailyUsage() {
-  return Number(
+export async function assetInUse(id: string) {
+  return (
     (
-      database()
-        .prepare("SELECT COUNT(*) AS n FROM ai_attempts WHERE at>=?")
-        .get(now().slice(0, 10)) as { n: number }
-    ).n,
+      await query(
+        "SELECT 1 FROM revisions WHERE user_id=$1 AND strpos(json,$2) > 0 LIMIT 1",
+        [userId(), JSON.stringify(id)],
+      )
+    ).length > 0
   );
 }
+export async function dailyUsage() {
+  const [row] = await query<{ n: number | string }>(
+    "SELECT COUNT(*) AS n FROM ai_attempts WHERE user_id=$1 AND at>=$2",
+    [userId(), now().slice(0, 10)],
+  );
+  return Number(row?.n ?? 0);
+}
+// AI calls are counted per account, per UTC day.
 export function dailyLimit() {
   const n = Number(process.env.AI_DAILY_CALL_LIMIT || 20);
   return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
 }
-export function state(): StudioState {
+export async function recordAiAttempt(id: string) {
+  await query("INSERT INTO ai_attempts VALUES($1,$2,$3,$4,NULL)", [
+    id,
+    userId(),
+    now(),
+    "reserved",
+  ]);
+}
+export async function updateAiAttempt(
+  id: string,
+  status: string,
+  usage: string,
+) {
+  await query(
+    "UPDATE ai_attempts SET status=$1,usage=$2 WHERE id=$3 AND user_id=$4",
+    [status, usage, id, userId()],
+  );
+}
+export async function state(): Promise<StudioState> {
+  const [brands, formats, posts, assets, usedToday] = await Promise.all([
+    list<Brand>("brand"),
+    list<Format>("format"),
+    list<Post>("post"),
+    list<Asset>("asset"),
+    dailyUsage(),
+  ]);
   return {
-    brands: list<Brand>("brand"),
-    formats: list<Format>("format"),
-    posts: list<Post>("post"),
-    assets: list<Asset>("asset"),
+    brands,
+    formats,
+    posts,
+    assets,
     settings: {
       aiReady: !!process.env.OPENAI_API_KEY,
       model: process.env.OPENAI_MODEL || "gpt-5.6-luna",
       dailyLimit: dailyLimit(),
-      usedToday: dailyUsage(),
-      localOnly: true,
+      usedToday,
+      hosted: hosted(),
+      email: account().email,
     },
   };
 }
-export function migrateFormatSlideCounts() {
-  const existingFormats = list<Format>("format");
-  existingFormats
-    .filter((format) => format.slideCount > 10)
-    .forEach((format) => {
-      put("format", {
-        ...format,
-        slideCount: 10,
-        version: (format.version ?? 0) + 1,
-      });
-      audit("format.slide_count_capped", format.id);
+export async function migrateFormatSlideCounts() {
+  const existingFormats = await list<Format>("format");
+  for (const format of existingFormats.filter((f) => f.slideCount > 10)) {
+    await put("format", {
+      ...format,
+      slideCount: 10,
+      version: (format.version ?? 0) + 1,
     });
+    await audit("format.slide_count_capped", format.id);
+  }
   return existingFormats;
 }
-function seed() {
+// A new account gets the starter brand and format on its first request.
+// One writer seeds; concurrent first requests wait on the lock, then see it.
+export async function ensureWorkspace() {
+  const id = userId();
+  if (seeded.has(id)) return;
+  await transaction(async () => {
+    await seed();
+    await addPhotoPreset();
+  });
+  seeded.add(id);
+}
+export async function closeStore() {
+  seeded.clear();
+  await closeDatabase();
+}
+async function seed() {
   const brand: Brand = {
     // Keep this stable ID so existing template posts retain their brand link.
     id: "demo-brand",
@@ -349,16 +429,16 @@ function seed() {
     destination: "",
   };
 
-  const existingFormats = migrateFormatSlideCounts();
+  const existingFormats = await migrateFormatSlideCounts();
   if (existingFormats.length) return;
   // TikTok photo story is the only starter format; addPhotoPreset adds it.
-  put("brand", brand);
+  await put("brand", brand);
 }
 // Add the new preset once without changing existing formats or approved posts.
-function addPhotoPreset() {
-  if (list<Format>("format").some((format) => format.id === "tiktok-photo"))
+async function addPhotoPreset() {
+  if ((await list<Format>("format")).some((f) => f.id === "tiktok-photo"))
     return;
-  put("format", {
+  await put("format", {
     id: "tiktok-photo",
     name: "TikTok photo story",
     description:
@@ -373,5 +453,5 @@ function addPhotoPreset() {
     design: "photo",
     slideCount: 6,
   } satisfies Format);
-  audit("format.tiktok_photo_added", "tiktok-photo");
+  await audit("format.tiktok_photo_added", "tiktok-photo");
 }

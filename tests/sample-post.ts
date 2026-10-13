@@ -4,7 +4,7 @@ type Store = typeof import("../src/lib/store");
 
 // Fresh workspaces used to seed this editorial format and post. Tests keep
 // them as a legacy fixture for editorial rendering, approval and export.
-export function seedSamplePost(store: Store): Post {
+export async function seedSamplePost(store: Store): Promise<Post> {
   const format: Format = {
     id: "field-notes",
     name: "Field notes",
@@ -18,7 +18,7 @@ export function seedSamplePost(store: Store): Post {
     font: "serif",
     slideCount: 6,
   };
-  store.put("format", format);
+  await store.put("format", format);
   const titles = [
     "Make room for your next good idea.",
     "Start before you feel ready.",
