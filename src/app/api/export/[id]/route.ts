@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import JSZip from "jszip";
 import { authorize } from "@/lib/auth";
-import { files } from "@/lib/files";
+import { exportBytes, files } from "@/lib/files";
 import {
   assertApproval,
   audit,
@@ -38,6 +38,8 @@ export async function GET(
     );
   }
 }
+
+const megabytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 async function exportPost(req: NextRequest, id: string) {
   const post = await get<Post>("post", id);
@@ -101,19 +103,27 @@ async function exportPost(req: NextRequest, id: string) {
     "README.txt",
     "Upload slide images in numerical order. Paste caption.txt and review music and disclosure settings in TikTok. Downloading this package does not publish it. Record the post URL in the studio after publishing.",
   );
-  await audit("export.downloaded", id);
   const name = `slideshow-${id.slice(0, 8)}-v${post.revision}.zip`;
   const data = await zip.generateAsync({ type: "nodebuffer" });
   // A package can outgrow a hosted function's response limit, so hosted
   // studios hand out a short-lived storage link instead of the bytes.
   if (files().remote) {
+    const limit = exportBytes();
+    if (data.byteLength > limit)
+      throw new StudioError(
+        `This package is ${megabytes(data.byteLength)}, over the ${megabytes(limit)} download limit. Download slides one at a time, or use fewer or simpler images.`,
+        413,
+      );
     const key = fileKey("exports", name);
     await files().write(key, data, "application/zip");
+    const url = await files().signedUrl(key, name);
+    await audit("export.downloaded", id);
     return NextResponse.json(
-      { url: await files().signedUrl(key, name) },
+      { url },
       { headers: { "Cache-Control": "no-store" } },
     );
   }
+  await audit("export.downloaded", id);
   return new NextResponse(new Uint8Array(data), {
     headers: {
       "Content-Type": "application/zip",

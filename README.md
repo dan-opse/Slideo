@@ -25,7 +25,12 @@ A hosted studio has accounts: people sign up with an email and password, and eac
    - `DATABASE_CA_CERT`: the certificate from **Database settings → SSL configuration → Download certificate**, pasted whole. The studio only connects to a remote database over TLS that verifies this certificate, whatever `sslmode` the URL carries, and refuses `sslmode=disable`, `allow`, or `prefer`. Turn on **Enforce SSL** there too. (For a database whose certificate is publicly trusted, add `?sslrootcert=system` to the URL instead.) A `DATABASE_URL` on `localhost`, `127.0.0.1`, or `::1` is the one exception: it connects without TLS unless it sets an `sslmode`.
 3. **Import the repository into Vercel**, add those settings plus `OPENAI_API_KEY` as environment variables, and deploy.
 
-On first use the studio creates its tables (with row-level security on, so Supabase's public API can't read them) and a private `studio` storage bucket. Images upload from the browser straight to storage through signed URLs, so they aren't limited by Vercel's 4.5 MB request size; downloads of approved packages use short-lived storage links for the same reason.
+On first use the studio creates its tables (with row-level security on, so Supabase's public API can't read them) and two private storage buckets, and brings existing ones to these settings:
+
+- `studio` holds images: uploads, the library, and rendered slides. It accepts JPEG, PNG, and WebP up to 20 MB each, which also limits what a signed upload URL accepts.
+- `studio-exports` holds approved ZIP packages, up to 50 MB each (the largest file Supabase's free plan accepts). On a paid plan, raise **Storage → Settings → Upload file size limit** and set `EXPORT_LIMIT_MB` to match. A larger package is refused with a message suggesting single-slide downloads.
+
+Images upload from the browser straight to storage through signed URLs, so they aren't limited by Vercel's 4.5 MB request size; downloads of approved packages use short-lived storage links for the same reason.
 
 `AI_DAILY_CALL_LIMIT` applies to each account. Vercel's free Hobby plan is for non-commercial use; charging for the studio needs a Pro plan.
 
