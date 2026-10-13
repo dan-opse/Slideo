@@ -90,8 +90,8 @@ export function ActionSheet({
           <>
             <h2>Delete this slideshow?</h2>
             <p>
-              It will be removed from your gallery. Its revisions remain stored
-              locally.
+              It will be removed from your gallery. Its revisions are kept, and
+              you can restore it from Deleted.
             </p>
             <button
               className="photo-action danger"

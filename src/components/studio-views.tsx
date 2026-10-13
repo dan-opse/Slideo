@@ -55,10 +55,7 @@ const viewCopy: Record<View, [string, string]> = {
     "Your analytics.",
     "Owner-recorded results from your published posts.",
   ],
-  Settings: [
-    "Settings.",
-    "A private, local workspace built around your process.",
-  ],
+  Settings: ["Settings.", "A private workspace built around your process."],
 };
 
 export function ViewHeading({ view }: { view: View }) {
@@ -281,27 +278,67 @@ export function SettingsView({
 }: {
   settings: StudioState["settings"];
 }) {
+  // Only text from a request you make reaches OpenAI.
+  const ai = settings.aiReady
+    ? " When you use AI writing, the brief and slide text for that request are sent to OpenAI."
+    : "";
   return (
     <div className="settings-grid">
-      <section className="settings-card">
-        <span className="stat-icon sage">
-          <ShieldCheck size={23} />
-        </span>
-        <h2>Local by design.</h2>
-        <p>
-          Your briefs, images, revisions, and exports are saved in this
-          project’s <code>data/</code> folder. Back up that whole folder with
-          the app stopped.
-        </p>
-        <dl>
-          <dt>Workspace access</dt>
-          <dd>This computer only</dd>
-          <dt>Publishing</dt>
-          <dd>Manual export, with approval</dd>
-          <dt>Storage</dt>
-          <dd>SQLite + local image files</dd>
-        </dl>
-      </section>
+      {settings.hosted ? (
+        <section className="settings-card">
+          <span className="stat-icon sage">
+            <ShieldCheck size={23} />
+          </span>
+          <h2>Private to your account.</h2>
+          <p>
+            Your briefs, images, revisions, and exports are stored in this
+            studio’s Supabase project: records in its Postgres database, files
+            in private storage. Only your signed-in account can open them.
+            {ai}
+          </p>
+          <dl>
+            <dt>Workspace access</dt>
+            <dd>{settings.email ?? "Your account"}</dd>
+            <dt>Sign-in</dt>
+            <dd>Email and password</dd>
+            <dt>Publishing</dt>
+            <dd>Manual export, with approval</dd>
+            <dt>Storage</dt>
+            <dd>Supabase Postgres + private storage</dd>
+            <dt>Backups</dt>
+            <dd>Made by the studio’s operator in Supabase</dd>
+          </dl>
+          <small>
+            To keep your own copy of a finished slideshow, download its approved
+            package.
+          </small>
+        </section>
+      ) : (
+        <section className="settings-card">
+          <span className="stat-icon sage">
+            <ShieldCheck size={23} />
+          </span>
+          <h2>Local by design.</h2>
+          <p>
+            Your briefs, images, revisions, and exports are saved in this
+            project’s <code>data/</code> folder: an embedded Postgres database
+            and image files. Back up that whole folder with the app stopped.
+            {ai}
+          </p>
+          <dl>
+            <dt>Workspace access</dt>
+            <dd>This computer only</dd>
+            <dt>Publishing</dt>
+            <dd>Manual export, with approval</dd>
+            <dt>Storage</dt>
+            <dd>PGlite (embedded Postgres) + local image files</dd>
+            <dt>Backups</dt>
+            <dd>
+              Copy <code>data/</code> with the app stopped
+            </dd>
+          </dl>
+        </section>
+      )}
       <section className="settings-card">
         <span className="stat-icon peach">
           <Sparkles size={23} />
@@ -310,7 +347,9 @@ export function SettingsView({
         <p>
           {settings.aiReady
             ? "OpenAI is configured. Website ideas and AI drafts use your brand facts and format instructions."
-            : "Add OPENAI_API_KEY to .env.local in the project folder, then restart. Never paste keys into a brand brief."}
+            : settings.hosted
+              ? "AI writing isn’t set up for this studio yet. Manual drafts work without it."
+              : "Add OPENAI_API_KEY to .env.local in the project folder, then restart. Never paste keys into a brand brief."}
         </p>
         <dl>
           <dt>Connection</dt>
@@ -332,15 +371,16 @@ export function SettingsView({
         </small>
       </section>
       <section className="settings-card">
-        <h2>What’s in this first build</h2>
+        <h2>What’s in this build</h2>
         <p>
-          Manual and AI drafts, brand briefs, reusable formats, local assets,
-          versioned editing, exact previews, approval, JPEG packages, planned
-          dates, and manual results.
+          Manual and AI drafts, brand briefs, reusable formats, an image
+          library, versioned editing, exact previews, approval, JPEG packages,
+          planned dates, and manual results. Hosted studios add accounts with
+          email sign-in.
         </p>
         <p>
-          Recurring generation, cloud authentication, MP4 exports, and
-          publishing-provider integration are upcoming milestones.
+          Recurring generation, MP4 exports, and publishing-provider integration
+          are upcoming milestones.
         </p>
       </section>
     </div>

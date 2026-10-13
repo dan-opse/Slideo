@@ -14,6 +14,11 @@ export const statusLabel = {
   published: "Published",
   archived: "Deleted",
 };
+// Where work is kept, for the sidebar workspace badge and the top bar.
+export const workspaceLabels = (hosted: boolean) =>
+  hosted
+    ? { workspace: "Hosted workspace", note: "Saved privately to your account" }
+    : { workspace: "Local workspace", note: "Saved on this computer" };
 export const imgUrl = (p: Post, i = 0) =>
   `/api/render/${p.id}/${p.revision}/${i}${p.slides[i]?.design === "photo" ? `?v=${PHOTO_RENDER_VERSION}` : ""}`;
 

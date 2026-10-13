@@ -10,6 +10,7 @@ import {
   updateAiAttempt,
   StudioError,
 } from "./store";
+import { hosted } from "./auth";
 import type { Brand, Format } from "./schema";
 import type { WebsiteSource } from "./website";
 import { roleNames, toneGuidance } from "./format-template";
@@ -148,17 +149,26 @@ async function recordAttempt(
   await updateAiAttempt(id, status, JSON.stringify(metadata));
 }
 
+// Setup instructions only help whoever runs the studio. Hosted accounts get
+// a plain message; the operator finds the detail in the server logs.
+function setupError(detail: string) {
+  if (!hosted()) return new StudioError(detail, 412);
+  console.error(detail);
+  return new StudioError(
+    "AI writing isn’t available right now. Manual drafts still work.",
+    412,
+  );
+}
+
 function providerError(error: unknown): StudioError {
   if (error instanceof StudioError) return error;
   if (error instanceof OpenAI.AuthenticationError)
-    return new StudioError(
+    return setupError(
       "OpenAI rejected the API key. Update OPENAI_API_KEY in .env.local and restart.",
-      412,
     );
   if (error instanceof OpenAI.NotFoundError)
-    return new StudioError(
+    return setupError(
       "The configured OpenAI model is unavailable. Check OPENAI_MODEL in .env.local.",
-      412,
     );
   if (error instanceof OpenAI.RateLimitError)
     return new StudioError(
@@ -187,9 +197,8 @@ export async function assertAiAvailable() {
 function clientAndModel() {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey)
-    throw new StudioError(
+    throw setupError(
       "Add OPENAI_API_KEY to .env.local, then restart the studio. Manual drafts work without a key.",
-      412,
     );
   const model = process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
   return {
