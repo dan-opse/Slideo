@@ -17,13 +17,49 @@ export const dataDir = path.resolve(
   /* turbopackIgnore: true */ process.env.STUDIO_DATA_DIR || "./data",
 );
 
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const INSECURE_MODES = new Set(["disable", "allow", "prefer"]);
+// The TLS settings for a DATABASE_URL. Remote databases always get an
+// encrypted connection that verifies the server's certificate, against
+// DATABASE_CA_CERT (Supabase: Database settings → SSL configuration) or,
+// when the URL says sslrootcert=system, the system's trusted roots. The URL's
+// own sslmode never weakens this: postgres.js would treat sslmode=require as
+// "encrypt without verifying". Only a database on this machine may skip TLS.
+export function databaseTls(
+  url: string,
+  env: Record<string, string | undefined> = process.env,
+): false | { rejectUnauthorized: true; ca?: string } {
+  const { hostname, searchParams } = new URL(url);
+  const mode = searchParams.get("sslmode");
+  const ca = env.DATABASE_CA_CERT?.replace(/\\n/g, "\n").trim();
+  const verified = { rejectUnauthorized: true as const, ...(ca ? { ca } : {}) };
+  if (LOOPBACK.has(hostname))
+    return !mode || mode === "disable" ? false : verified;
+  if (mode && INSECURE_MODES.has(mode))
+    throw new Error(
+      `DATABASE_URL sets sslmode=${mode}. Remote databases need verified TLS: remove sslmode or use sslmode=verify-full.`,
+    );
+  if (!ca && searchParams.get("sslrootcert") !== "system")
+    throw new Error(
+      "Set DATABASE_CA_CERT to your Supabase project's CA certificate (Database settings → SSL configuration), or add sslrootcert=system to DATABASE_URL if its certificate is publicly trusted.",
+    );
+  return verified;
+}
+
 // Hosted deployments connect to Postgres (Supabase's transaction pooler on
 // Vercel). Without DATABASE_URL the studio runs an embedded Postgres in the
 // data folder, so local use and tests need no database server.
 async function postgresDriver(url: string): Promise<Driver> {
   const { default: postgres } = await import("postgres");
+  const ssl = databaseTls(url);
+  // databaseTls has read the TLS parameters; postgres.js would send ones it
+  // doesn't know (sslrootcert) to the server, which rejects them.
+  const target = new URL(url);
+  target.searchParams.delete("sslmode");
+  target.searchParams.delete("sslrootcert");
   // The transaction pooler cannot keep prepared statements between calls.
-  const sql = postgres(url, {
+  const sql = postgres(target.href, {
+    ssl,
     prepare: false,
     max: Number(process.env.DATABASE_POOL_SIZE || 3),
     idle_timeout: 20,

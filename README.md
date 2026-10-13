@@ -22,6 +22,7 @@ A hosted studio has accounts: people sign up with an email and password, and eac
    - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (or the legacy anon key) from **Project Settings → API Keys**.
    - `SUPABASE_SERVICE_ROLE_KEY` (the secret key), used only by the server for file storage.
    - `DATABASE_URL`: **Connect → Transaction pooler** connection string (port 6543), with your database password.
+   - `DATABASE_CA_CERT`: the certificate from **Database settings → SSL configuration → Download certificate**, pasted whole. The studio only connects to a remote database over TLS that verifies this certificate, whatever `sslmode` the URL carries, and refuses `sslmode=disable`, `allow`, or `prefer`. Turn on **Enforce SSL** there too. (For a database whose certificate is publicly trusted, add `?sslrootcert=system` to the URL instead.) A `DATABASE_URL` on `localhost`, `127.0.0.1`, or `::1` is the one exception: it connects without TLS unless it sets an `sslmode`.
 3. **Import the repository into Vercel**, add those settings plus `OPENAI_API_KEY` as environment variables, and deploy.
 
 On first use the studio creates its tables (with row-level security on, so Supabase's public API can't read them) and a private `studio` storage bucket. Images upload from the browser straight to storage through signed URLs, so they aren't limited by Vercel's 4.5 MB request size; downloads of approved packages use short-lived storage links for the same reason.

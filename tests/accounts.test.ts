@@ -144,7 +144,8 @@ test("a hosted studio refuses requests without a session", async () => {
       });
     // Missing server settings fail closed instead of falling back to local.
     assert.equal(((await authorize(request())) as Response).status, 503);
-    process.env.DATABASE_URL = "postgres://unused";
+    process.env.DATABASE_URL =
+      "postgresql://u:p@db.example.test:6543/postgres?sslrootcert=system";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "unused";
     assert.equal(((await authorize(request())) as Response).status, 401);
     // Store calls outside a signed-in request never default to an account.

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { databaseTls } from "./db";
 
 // Without Supabase settings the studio is a single-user app on this computer.
 export const LOCAL_USER = "local";
@@ -14,10 +15,20 @@ export function supabaseConfig() {
 }
 export const hosted = () => !!supabaseConfig();
 
-const missingHostedSettings = () =>
-  ["DATABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].filter(
+// Hosted mode fails closed: it never falls back to local storage or to an
+// unverified database connection.
+function hostedSettingsProblem() {
+  const missing = ["DATABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].filter(
     (name) => !process.env[name],
   );
+  if (missing.length) return `Hosted mode needs ${missing.join(" and ")}.`;
+  try {
+    databaseTls(process.env.DATABASE_URL!);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  return null;
+}
 
 const deny = (error: string, status: number) =>
   NextResponse.json({ error }, { status });
@@ -65,9 +76,9 @@ export async function authorize(
       );
     return crossSite(request) ?? { id: LOCAL_USER, email: null };
   }
-  const missing = missingHostedSettings();
-  if (missing.length) {
-    console.error(`Hosted mode needs ${missing.join(" and ")}.`);
+  const problem = hostedSettingsProblem();
+  if (problem) {
+    console.error(problem);
     return deny("The studio is not fully configured yet.", 503);
   }
   const refused = crossSite(request);
