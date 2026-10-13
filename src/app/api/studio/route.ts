@@ -47,11 +47,7 @@ import {
 } from "@/lib/ai";
 import { readWebsite } from "@/lib/website";
 import { photoFont } from "@/lib/photo-render";
-import {
-  slideAssetIds,
-  slideStructure,
-  templateSlide,
-} from "@/lib/format-template";
+import { slideStructure, templateSlide } from "@/lib/format-template";
 import { describeIssues } from "@/lib/errors";
 import { logUnexpected } from "@/lib/log";
 export const runtime = "nodejs";
@@ -414,10 +410,6 @@ async function handle(action: string, input: Record<string, unknown>) {
   }
   if (action === "save") {
     const content = postSchema.parse(input.data);
-    await get<Brand>("brand", content.brandId);
-    await get<Format>("format", content.formatId);
-    for (const s of content.slides)
-      for (const id of slideAssetIds(s)) await get<Asset>("asset", id);
     return NextResponse.json(
       await savePost(
         content,
@@ -537,9 +529,11 @@ async function handle(action: string, input: Record<string, unknown>) {
     const post = await savePost(checked.data);
     return NextResponse.json(post);
   }
+  // Actions that change a post read it inside the account transaction; a
+  // copy read earlier could overwrite a change made in between.
   const id = z.string().parse(input.id);
-  const post = await get<Post>("post", id);
   if (action === "duplicate") {
+    const post = await get<Post>("post", id);
     const suffix = " (copy)";
     return NextResponse.json(
       await savePost({
@@ -551,7 +545,8 @@ async function handle(action: string, input: Record<string, unknown>) {
   }
   if (action === "render" || action === "approve") {
     const revision = z.number().int().parse(input.revision);
-    if (post.revision !== revision)
+    // approvePost checks the revision again under the lock.
+    if ((await get<Post>("post", id)).revision !== revision)
       throw new StudioError(
         "Stale revision. Save and review the current version.",
         409,
@@ -607,21 +602,25 @@ async function handle(action: string, input: Record<string, unknown>) {
     );
   }
   if (action === "metrics") {
-    if (post.status !== "published")
-      throw new StudioError("Record a published post before adding results.");
-    const snapshot = {
-      ...metricsSchema.parse(input.data),
-      measuredAt: now(),
-    };
-    // Keep earlier snapshots so results can be compared over time.
-    post.metricsHistory = [
-      ...(post.metricsHistory ?? []),
-      ...(post.metrics ? [post.metrics] : []),
-    ].slice(-MAX_METRIC_SNAPSHOTS);
-    post.metrics = snapshot;
-    await put("post", post);
-    await audit("results.recorded", id);
-    return NextResponse.json(post);
+    const data = metricsSchema.parse(input.data);
+    return NextResponse.json(
+      await transaction(async () => {
+        const post = await get<Post>("post", id);
+        if (post.status !== "published")
+          throw new StudioError(
+            "Record a published post before adding results.",
+          );
+        // Keep earlier snapshots so results can be compared over time.
+        post.metricsHistory = [
+          ...(post.metricsHistory ?? []),
+          ...(post.metrics ? [post.metrics] : []),
+        ].slice(-MAX_METRIC_SNAPSHOTS);
+        post.metrics = { ...data, measuredAt: now() };
+        await put("post", post);
+        await audit("results.recorded", id);
+        return post;
+      }),
+    );
   }
   throw new StudioError("Unknown action.");
 }

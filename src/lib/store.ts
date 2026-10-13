@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
-import { visibleAssetIds } from "./format-template";
+import { slideAssetIds, visibleAssetIds } from "./format-template";
 import { closeDatabase, driver, type Runner } from "./db";
 import { hosted, LOCAL_USER, type Account } from "./auth";
 import type {
@@ -172,6 +172,13 @@ export async function savePost(
   expected?: number,
 ): Promise<Post> {
   return transaction(async () => {
+    // References are checked under the lock that image removal also takes,
+    // so a revision can never point at an image deleted a moment earlier.
+    await get<Brand>("brand", content.brandId);
+    await get<Format>("format", content.formatId);
+    for (const slide of content.slides)
+      for (const asset of slideAssetIds(slide))
+        await get<Asset>("asset", asset);
     const old = id ? await get<Post>("post", id) : undefined;
     if (old && old.revision !== expected)
       throw new StudioError(
