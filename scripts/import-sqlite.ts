@@ -1,5 +1,5 @@
 // Copies a workspace from the original SQLite studio into the configured
-// database and file storage, under one account. Safe to run again.
+// database and file storage, under one account.
 //
 //   node --import tsx scripts/import-sqlite.ts <old data folder> [account id]
 //
@@ -8,12 +8,12 @@
 //
 //   node --env-file=.env.production.local --import tsx \
 //     scripts/import-sqlite.ts ./data 2f1c…-user-uuid
-import { DatabaseSync } from "node:sqlite";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
-import { closeDatabase, driver } from "../src/lib/db";
-import { files } from "../src/lib/files";
+//
+// The import only adds records. Anything the account already has is left as
+// it is and listed, so running it again never undoes later work.
+import { closeDatabase } from "../src/lib/db";
 import { hosted, LOCAL_USER } from "../src/lib/auth";
+import { importSqlite } from "../src/lib/import-sqlite";
 
 const [folder, accountArg] = process.argv.slice(2);
 if (!folder) {
@@ -28,65 +28,18 @@ if (!/^[A-Za-z0-9_-]+$/.test(account)) {
   process.exit(1);
 }
 
-const old = new DatabaseSync(path.join(folder, "studio.sqlite"), {
-  readOnly: true,
-});
-const rows = (sql: string) =>
-  old.prepare(sql).all() as Record<string, string | number | null>[];
-const db = await driver();
-// Oldest first, so the studio lists records in their original order.
-const entities = rows("SELECT kind,id,json FROM entities ORDER BY rowid ASC");
-const revisions = rows("SELECT post_id,revision,json,hash FROM revisions");
-const approvals = rows(
-  "SELECT post_id,revision,hash,render_hashes,created_at FROM approvals",
-);
-const audit = rows("SELECT id,action,entity,at FROM audit");
-const attempts = rows("SELECT id,at,status,usage FROM ai_attempts");
-
-await db.transaction(async (tx) => {
-  for (const r of entities)
-    await tx.query(
-      "INSERT INTO entities(user_id,kind,id,json) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,kind,id) DO UPDATE SET json=excluded.json",
-      [account, r.kind, r.id, r.json],
-    );
-  for (const r of revisions)
-    await tx.query(
-      "INSERT INTO revisions VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
-      [account, r.post_id, r.revision, r.json, r.hash],
-    );
-  for (const r of approvals)
-    await tx.query(
-      "INSERT INTO approvals VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING",
-      [account, r.post_id, r.revision, r.hash, r.render_hashes, r.created_at],
-    );
-  for (const r of audit)
-    await tx.query(
-      "INSERT INTO audit VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
-      [r.id, account, r.action, r.entity, r.at],
-    );
-  for (const r of attempts)
-    await tx.query(
-      "INSERT INTO ai_attempts VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
-      [r.id, account, r.at, r.status, r.usage],
-    );
-});
-old.close();
-
-// Renders are rebuilt on demand; only the uploaded images need copying.
-const assets = path.join(folder, "assets");
-const images = existsSync(assets)
-  ? readdirSync(assets).filter((name) => name.endsWith(".jpg"))
-  : [];
-let copied = 0;
-for (const name of images) {
-  await files().write(
-    `${account}/assets/${name}`,
-    readFileSync(path.join(assets, name)),
-    "image/jpeg",
+try {
+  const report = await importSqlite(folder, account);
+  const added = Object.entries(report.added)
+    .map(([kind, n]) => `${n} ${kind}${n === 1 ? "" : "s"}`)
+    .join(", ");
+  console.log(
+    `Imported into account "${account}": ${added || "no new records"}; ${report.images} images copied.`,
   );
-  copied++;
+  if (report.kept.length)
+    console.log(
+      `Kept ${report.kept.length} records the account already has, which differ from the SQLite copy:\n  ${report.kept.join("\n  ")}`,
+    );
+} finally {
+  await closeDatabase();
 }
-await closeDatabase();
-console.log(
-  `Imported ${entities.length} records, ${revisions.length} revisions and ${copied} images into account "${account}".`,
-);

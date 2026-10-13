@@ -28,13 +28,15 @@ On first use the studio creates its tables (with row-level security on, so Supab
 
 `AI_DAILY_CALL_LIMIT` applies to each account. Vercel's free Hobby plan is for non-commercial use; charging for the studio needs a Pro plan.
 
-To copy an existing local workspace into a hosted account, run the import with the hosted settings and the account's Supabase user id (from **Authentication → Users**):
+To copy a workspace from the original SQLite release (`data/studio.sqlite` and `data/assets/`) into a hosted account, run the import with the hosted settings and the account's Supabase user id (from **Authentication → Users**):
 
 ```bash
 node --env-file=.env.production.local --import tsx scripts/import-sqlite.ts ./data <user-id>
 ```
 
-The same script, without settings or a user id, moves a workspace from the original SQLite release (`data/studio.sqlite`) into the current local studio.
+Without settings or a user id, the same script imports into the current local studio.
+
+The import only adds. Records the account already has are left as they are, even when the SQLite copy differs, and the script lists those. A slideshow is imported together with its revisions and approval, or not at all, so its history always matches it. Images are copied before any records, so an import that stops partway can simply be run again. To replace an account's data with the SQLite copy instead, delete that data first.
 
 ## Current workflow
 
