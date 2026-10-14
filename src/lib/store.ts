@@ -154,7 +154,8 @@ async function write(change: Change) {
   tx.changes.push(change);
   if (change.op === "put")
     tx.entities.set(`${change.kind}/${change.id}`, change.json);
-  if (change.op === "delete") tx.entities.set(`${change.kind}/${change.id}`, null);
+  if (change.op === "delete")
+    tx.entities.set(`${change.kind}/${change.id}`, null);
   if (change.op === "revision")
     tx.revisions.set(`${change.post}/${change.revision}`, change.json);
   if (change.op === "approve") tx.approvals.set(change.post, change);

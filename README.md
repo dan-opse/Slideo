@@ -15,22 +15,25 @@ The app works without an AI provider. To enable website ideas and AI writing, co
 
 ## Host it on Vercel
 
-A hosted studio has accounts: people sign up with an email and password, and each account sees only its own brands, formats, slideshows, images, and AI allowance. Supabase provides the database (Postgres), sign-in, and file storage.
+A hosted studio has accounts: people sign up with an email and password, and each account sees only its own brands, formats, slideshows, images, and AI allowance. Supabase provides sign-in, the data, and file storage. The studio talks to Supabase only over its HTTPS APIs, so there is no database password, connection string, or certificate to configure.
 
-1. **Create a Supabase project.** In **Authentication → URL Configuration**, set the Site URL to your Vercel domain and add `https://<your-domain>/auth/confirm` to the redirect URLs. Supabase's built-in email sender is rate-limited; add your own SMTP provider under **Authentication → Emails** before inviting many people.
-2. **Collect the settings** (listed in `.env.example`):
-   - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (or the legacy anon key) from **Project Settings → API Keys**.
-   - `SUPABASE_SERVICE_ROLE_KEY` (the secret key), used only by the server for file storage.
-   - `DATABASE_URL`: **Connect → Transaction pooler** connection string (port 6543), with your database password.
-   - `DATABASE_CA_CERT`: the certificate from **Database settings → SSL configuration → Download certificate**, pasted whole. The studio only connects to a remote database over TLS that verifies this certificate, whatever `sslmode` the URL carries, and refuses `sslmode=disable`, `allow`, or `prefer`. Turn on **Enforce SSL** there too. (For a database whose certificate is publicly trusted, add `?sslrootcert=system` to the URL instead.) A `DATABASE_URL` on `localhost`, `127.0.0.1`, or `::1` is the one exception: it connects without TLS unless it sets an `sslmode`.
-3. **Import the repository into Vercel**, add those settings plus `OPENAI_API_KEY` as environment variables, and deploy.
+1. **Create or select a Supabase project.**
+2. **Turn on the Data API** (**Project Settings → Data API**), with `public` among the exposed schemas. You can leave automatic exposure of new tables off: the setup script grants exactly what the studio needs.
+3. **Install the schema once.** Open **SQL Editor → New query**, paste the contents of [`supabase/migrations/20261014013833_slideo_api.sql`](supabase/migrations/20261014013833_slideo_api.sql), and run it. (With the Supabase CLI linked to the project, `supabase db push` does the same.) It creates the tables, the `slideo_*` functions the studio calls, and the two private buckets. Running it again is safe: it adds what is missing and never removes data. A project set up by an earlier preview of this branch upgrades the same way, keeping its rows.
+4. **Configure sign-in.** In **Authentication → URL Configuration**, set the Site URL to your Vercel domain and add `https://<your-domain>/auth/confirm` (and your preview domains' `/auth/confirm`) to the redirect URLs. Supabase's built-in email sender is rate-limited; add your own SMTP provider under **Authentication → Emails** before inviting many people.
+5. **Add three environment variables in Vercel** (all from **Project Settings → API Keys**; see `.env.example`), plus `OPENAI_API_KEY` if you want AI writing:
+   - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: public, used by browsers to sign in.
+   - `SUPABASE_SECRET_KEY`: server-only. Mark it **Sensitive** and never give it a `NEXT_PUBLIC_` prefix.
+6. **Deploy a preview** and test it: sign up and confirm the email, upload an image, create and approve a slideshow, download its package, sign out, and check that a second account sees none of the first one's work.
 
-On first use the studio creates its tables (with row-level security on, so Supabase's public API can't read them) and two private storage buckets, and brings existing ones to these settings:
+Why a secret key as well as the publishable one: rendered slides, approvals, the audit trail, and the AI allowance must be written only by the studio's server, after it renders and checks the slides. Anything a signed-in browser's own session can call, that person can also call outside the app, so browsers get no direct access to the tables, functions, or buckets at all. The server verifies each request's session, then acts for exactly that account with the secret key. If any of the three settings is missing, or the project lacks the setup SQL, the studio answers with a "not fully set up" error and logs the reason; it never falls back to local files.
+
+The setup script creates two private buckets (the studio also checks and corrects their settings when it starts):
 
 - `studio` holds images: uploads, the library, and rendered slides. It accepts JPEG, PNG, and WebP up to 20 MB each, which also limits what a signed upload URL accepts.
 - `studio-exports` holds approved ZIP packages, up to 50 MB each (the largest file Supabase's free plan accepts). On a paid plan, raise **Storage → Settings → Upload file size limit** and set `EXPORT_LIMIT_MB` to match. A larger package is refused with a message suggesting single-slide downloads.
 
-Images upload from the browser straight to storage through signed URLs, so they aren't limited by Vercel's 4.5 MB request size; downloads of approved packages use short-lived storage links for the same reason.
+Images upload from the browser straight to storage through one-file signed URLs, so they aren't limited by Vercel's 4.5 MB request size; downloads of approved packages use short-lived storage links for the same reason. Neither bucket has storage policies, so a browser can't list, read, or replace anything in them with its session.
 
 `AI_DAILY_CALL_LIMIT` applies to each account. Vercel's free Hobby plan is for non-commercial use; charging for the studio needs a Pro plan.
 
@@ -40,9 +43,9 @@ To copy a workspace from the original SQLite release (`data/studio.sqlite` and `
 node --env-file=.env.production.local --import tsx scripts/import-sqlite.ts ./data <user-id>
 ```
 
-Without settings or a user id, the same script imports into the current local studio.
+It needs the same three settings as the deployment, no database password. Only someone holding the secret key can run it; nobody can import into an account from the app. Without settings or a user id, the same script imports into the current local studio.
 
-The import only adds. Records the account already has are left as they are, even when the SQLite copy differs, and the script lists those. A slideshow is imported together with its revisions and approval, or not at all, so its history always matches it. Images are copied before any records, so an import that stops partway can simply be run again. To replace an account's data with the SQLite copy instead, delete that data first.
+The import only adds. Records the account already has are left as they are, even when the SQLite copy differs, and the script lists those. A slideshow is imported together with its revisions and approval in one commit, or not at all, so its history always matches it. Records go over in commits of at most 200 changes. Images are copied before any records, so an import that stops partway can simply be run again; a repeat adds nothing that is already there. To replace an account's data with the SQLite copy instead, delete that data first.
 
 ## Current workflow
 
@@ -91,7 +94,7 @@ A local studio stores everything under `data/` by default:
 
 Stop the app and back up the entire `data/` directory together. Set `STUDIO_DATA_DIR` to use a different location.
 
-A hosted studio keeps the same records in Supabase Postgres, scoped by account, and files in the `studio` storage bucket under each account's folder. Supabase's free plan keeps no backups; a paid plan adds daily backups.
+A hosted studio keeps the same records in its Supabase project's database, scoped by account, and files in the `studio` and `studio-exports` buckets under each account's folder. Both modes run the same SQL in `supabase/migrations`: the local studio applies it to its embedded database on start. Each change to an account commits atomically through `slideo_commit`, and the database itself keeps revisions and the audit trail append-only and published slideshows unchanged. Supabase's free plan keeps no backups; a paid plan adds daily backups.
 
 ## Checks
 
@@ -101,6 +104,15 @@ npm run lint
 npm test
 npm run build
 ```
+
+`npm test` runs every test on the embedded database. To run the same tests against Supabase's real Data API, Auth, and Storage, start the local stack (Docker and the [Supabase CLI](https://supabase.com/docs/guides/local-development) required; `supabase/config.toml` uses ports 55420–55429) and run:
+
+```bash
+supabase start
+npm run test:supabase
+```
+
+That run also includes `tests/hosted.test.ts`, which signs in two accounts and checks uploads, a package over 20 MB, account isolation, and that a browser's own session can't reach the tables, functions, or buckets.
 
 CI (`.github/workflows/ci.yml`) runs these plus a Prettier check and `npm audit --omit=dev` on every pull request. Linting uses [oxlint](https://oxc.rs), because `typescript-eslint` does not support TypeScript 7.
 

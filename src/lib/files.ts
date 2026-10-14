@@ -164,9 +164,7 @@ let instance: FileStore | undefined;
 export function files() {
   return (instance ??= hosted()
     ? supabaseStore(
-        import("./supabase-admin").then(({ serviceClient }) =>
-          serviceClient(),
-        ),
+        import("./supabase-admin").then(({ serviceClient }) => serviceClient()),
       )
     : localStore());
 }

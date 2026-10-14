@@ -12,17 +12,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import type { Asset, Post } from "../src/lib/schema";
-import { closeTestDatabase, sql, useTestDatabase } from "./database";
+import { closeTestDatabase, sql, prepareTestDatabase } from "./database";
 const folder = mkdtempSync(path.join(tmpdir(), "slideo-races-test-"));
 process.env.STUDIO_DATA_DIR = folder;
 const store = await import("../src/lib/store");
-const { backend, useBackend } = await import("../src/lib/db");
+const { backend, setBackend } = await import("../src/lib/db");
 const { POST } = await import("../src/app/api/studio/route");
 const { visibleAssetIds } = await import("../src/lib/format-template");
 const { NextRequest } = await import("next/server");
-await useTestDatabase();
+await prepareTestDatabase();
 after(async () => {
-  useBackend(undefined);
+  setBackend(undefined);
   await store.closeStore();
   await closeTestDatabase();
   rmSync(folder, { recursive: true, force: true });
@@ -53,9 +53,12 @@ function pause(): Pause {
 const pauses = new Map<string, { fn: string; pause: Pause }>();
 const commits = new Map<string, boolean[]>();
 const real = await backend();
-useBackend({
+setBackend({
   ...real,
-  async call<T>(fn: Parameters<typeof real.call>[0], args: Record<string, unknown>) {
+  async call<T>(
+    fn: Parameters<typeof real.call>[0],
+    args: Record<string, unknown>,
+  ) {
     const who = caller.getStore();
     const stop = who ? pauses.get(who) : undefined;
     if (stop && stop.fn === fn) {
@@ -285,6 +288,28 @@ test("VM-02: a save committed while removal waits keeps its image", async () => 
   assert.equal(approved.status, 200, approved.body.error);
 });
 
+test("two requests for the last AI attempt of the day let exactly one through", async () => {
+  const { reserveAttempt } = await import("../src/lib/ai");
+  process.env.AI_DAILY_CALL_LIMIT = String((await store.dailyUsage()) + 1);
+  try {
+    const first = pauseBefore("r1", "slideo_commit");
+    const r1 = caller.run("r1", () => reserveAttempt()).catch((e) => e);
+    await first.reached;
+    const r2 = await caller.run("r2", () => reserveAttempt());
+    first.release();
+    const refused = await r1;
+    assert.equal(typeof r2, "string");
+    assert.equal(refused.status, 429);
+    assert.deepEqual(commits.get("r1"), [false]);
+    assert.equal(
+      await store.dailyUsage(),
+      Number(process.env.AI_DAILY_CALL_LIMIT),
+    );
+  } finally {
+    delete process.env.AI_DAILY_CALL_LIMIT;
+  }
+});
+
 // Rollback: a refused or failed change leaves no partial state.
 
 test("a refused approval writes no approval, status change, or audit entry", async () => {
@@ -303,7 +328,10 @@ test("a refused approval writes no approval, status change, or audit entry", asy
   });
   assert.equal(refused.status, 400);
   assert.match(refused.body.error, /usage rights/);
-  assert.equal((await store.get<Post>("post", draft.id)).status, "needs_review");
+  assert.equal(
+    (await store.get<Post>("post", draft.id)).status,
+    "needs_review",
+  );
   assert.equal(
     (await sql("SELECT 1 FROM approvals WHERE post_id=$1", [draft.id])).length,
     0,
@@ -335,7 +363,9 @@ test("a commit the database refuses applies none of its changes", async () => {
   assert.equal(await revisions(draft.id), 1);
   assert.equal(await auditCount("post.revised", draft.id), 0);
   assert.equal(
-    Number((await sql<{ v: string }>("SELECT version AS v FROM accounts"))[0].v),
+    Number(
+      (await sql<{ v: string }>("SELECT version AS v FROM accounts"))[0].v,
+    ),
     before,
   );
 });

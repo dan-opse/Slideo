@@ -12,13 +12,13 @@ import {
   slideStructure,
 } from "../src/lib/format-template";
 import { seedSamplePost } from "./sample-post";
-import { closeTestDatabase, sql, useTestDatabase } from "./database";
+import { closeTestDatabase, sql, prepareTestDatabase } from "./database";
 const folder = mkdtempSync(path.join(tmpdir(), "slideo-format-test-"));
 process.env.STUDIO_DATA_DIR = folder;
 process.env.OPENAI_API_KEY = "test-key";
 process.env.AI_DAILY_CALL_LIMIT = "50";
 const store = await import("../src/lib/store");
-await useTestDatabase();
+await prepareTestDatabase();
 const { POST } = await import("../src/app/api/studio/route");
 const { NextRequest } = await import("next/server");
 const { renderAll } = await import("../src/lib/render");

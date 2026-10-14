@@ -45,15 +45,15 @@ export async function sql<T = Record<string, unknown>>(
 }
 
 // Call after importing the store, before using it.
-export async function useTestDatabase() {
+export async function prepareTestDatabase() {
   if (!onSupabase) return;
   await sql(
     "TRUNCATE public.entities, public.revisions, public.approvals, public.audit, public.ai_attempts, public.accounts",
   );
-  const { useBackend, supabaseBackend } = await import("../src/lib/db");
+  const { setBackend, supabaseBackend } = await import("../src/lib/db");
   const { createClient } = await import("@supabase/supabase-js");
   const { API_URL, SECRET_KEY } = localStack();
-  useBackend(
+  setBackend(
     supabaseBackend(
       createClient(API_URL, SECRET_KEY, {
         auth: { persistSession: false, autoRefreshToken: false },

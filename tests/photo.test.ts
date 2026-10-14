@@ -23,11 +23,11 @@ import {
 } from "../src/lib/photo-layout";
 import { postSchema, photoTextSchema, type Post } from "../src/lib/schema";
 import { seedSamplePost } from "./sample-post";
-import { closeTestDatabase, sql, useTestDatabase } from "./database";
+import { closeTestDatabase, prepareTestDatabase } from "./database";
 const folder = mkdtempSync(path.join(tmpdir(), "slideo-photo-test-"));
 process.env.STUDIO_DATA_DIR = folder;
 const store = await import("../src/lib/store");
-await useTestDatabase();
+await prepareTestDatabase();
 const { photoFont, renderPhotoSlide } = await import("../src/lib/photo-render");
 const { renderAll } = await import("../src/lib/render");
 const font = await photoFont();

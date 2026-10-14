@@ -187,7 +187,7 @@ export function backend(): Promise<Backend> {
   }));
 }
 // Tests swap in a backend; undefined restores the configured one.
-export function useBackend(db: Backend | undefined) {
+export function setBackend(db: Backend | undefined) {
   override = db;
 }
 export async function closeDatabase() {

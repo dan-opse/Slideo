@@ -18,12 +18,12 @@ import {
   closeTestDatabase,
   onSupabase,
   sql,
-  useTestDatabase,
+  prepareTestDatabase,
 } from "./database";
 const folder = mkdtempSync(path.join(tmpdir(), "slideo-import-test-"));
 process.env.STUDIO_DATA_DIR = path.join(folder, "studio");
 const store = await import("../src/lib/store");
-await useTestDatabase();
+await prepareTestDatabase();
 const { files } = await import("../src/lib/files");
 const { importSqlite } = await import("../src/lib/import-sqlite");
 after(async () => {
@@ -238,10 +238,10 @@ CREATE TABLE ai_attempts(id TEXT PRIMARY KEY,at TEXT NOT NULL,status TEXT NOT NU
       .run(`bulk-ai-${i}`, "2026-01-01T00:00:00Z", "complete", "{}");
   }
   old.close();
-  const { backend, useBackend } = await import("../src/lib/db");
+  const { backend, setBackend } = await import("../src/lib/db");
   const real = await backend();
   const sizes: number[] = [];
-  useBackend({
+  setBackend({
     ...real,
     call(fn, args) {
       if (fn === "slideo_commit")
@@ -256,7 +256,7 @@ CREATE TABLE ai_attempts(id TEXT PRIMARY KEY,at TEXT NOT NULL,status TEXT NOT NU
     const again = await importSqlite(dir, "bulk");
     assert.deepEqual([again.added, again.kept], [{}, []]);
   } finally {
-    useBackend(onSupabase ? real : undefined);
+    setBackend(onSupabase ? real : undefined);
   }
   const count = async (table: string) =>
     (
@@ -265,11 +265,7 @@ CREATE TABLE ai_attempts(id TEXT PRIMARY KEY,at TEXT NOT NULL,status TEXT NOT NU
       )
     )[0].n;
   assert.deepEqual(
-    [
-      await count("entities"),
-      await count("audit"),
-      await count("ai_attempts"),
-    ],
+    [await count("entities"), await count("audit"), await count("ai_attempts")],
     [450, 450, 450],
   );
   // Listed in their original order, newest first.

@@ -117,7 +117,8 @@ type UsageRecord = {
   outputTokens?: number;
 };
 
-async function reserveAttempt() {
+// Counts an attempt against today's limit before the provider is called.
+export async function reserveAttempt() {
   const id = uid();
   await transaction(async () => {
     if ((await dailyUsage()) >= dailyLimit())

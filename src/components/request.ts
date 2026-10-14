@@ -49,12 +49,17 @@ export async function uploadImage(
     headers: { "Content-Type": file.type || "application/octet-stream" },
     body: file,
   }).catch(() => null);
-  if (!sent?.ok)
+  if (!sent?.ok) {
+    // Supabase Storage answers 400 and names the real status in the body.
+    const detail = (await sent?.json().catch(() => null)) as {
+      statusCode?: string;
+    } | null;
     throw new Error(
-      sent?.status === 413
+      sent?.status === 413 || detail?.statusCode === "413"
         ? "Choose a JPEG, PNG, or WebP under 20 MB."
         : "The upload did not finish. Check your connection and try again.",
     );
+  }
   return studioAction(
     "importUpload",
     { id: target.id, name: file.name, ...fields },

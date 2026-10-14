@@ -88,7 +88,8 @@ export async function importSqlite(
     const batches: Record_[][] = [[]];
     let size = 0;
     for (const r of entities) {
-      const cost = 1 + (r.kind === "post" ? (history.get(r.id)?.length ?? 0) : 0);
+      const cost =
+        1 + (r.kind === "post" ? (history.get(r.id)?.length ?? 0) : 0);
       if (size && size + cost > BATCH) {
         batches.push([]);
         size = 0;
@@ -138,24 +139,20 @@ export async function importSqlite(
     }
     // The audit trail and AI attempts keep their ids, so a repeat adds none.
     const trail: Change[] = [
-      ...audit.map(
-        (r): Change => ({
-          op: "audit",
-          id: String(r.id),
-          action: String(r.action),
-          entity: String(r.entity),
-          at: String(r.at),
-        }),
-      ),
-      ...attempts.map(
-        (r): Change => ({
-          op: "ai",
-          id: String(r.id),
-          at: String(r.at),
-          status: String(r.status),
-          usage: r.usage === null ? null : String(r.usage),
-        }),
-      ),
+      ...audit.map((r): Change => ({
+        op: "audit",
+        id: String(r.id),
+        action: String(r.action),
+        entity: String(r.entity),
+        at: String(r.at),
+      })),
+      ...attempts.map((r): Change => ({
+        op: "ai",
+        id: String(r.id),
+        at: String(r.at),
+        status: String(r.status),
+        usage: r.usage === null ? null : String(r.usage),
+      })),
     ];
     for (let i = 0; i < trail.length; i += BATCH)
       await transaction(async () => {
