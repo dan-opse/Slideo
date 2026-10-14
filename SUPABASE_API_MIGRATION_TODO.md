@@ -5,130 +5,157 @@
 - Working branch: `worktree-vercel-supabase`
 - Existing PR: [#15](https://github.com/dan-opse/Slideo/pull/15)
 - Planning baseline: `14a5d8e563d714404ee06191c69a34c47b725b85`
-- Status: TODO; this document changes no application behavior.
+- Status: **Implemented and verified locally (2026-10-13)** in `e9c596a` and `f761fd0`, with this record in the following docs commit. Hosted persistence uses only Supabase's HTTPS APIs. Verified against a real local Supabase stack (Auth, Data API, Storage, Mailpit) and the production build; a Vercel preview against the user's `slideo-preview` project is still to do (see "Not yet verified").
 
-## User decision and desired outcome
+## Outcome in one paragraph
 
-The user explicitly prefers the simpler Supabase API setup used in their other web apps. Implement hosted persistence through Supabase's HTTPS Data API and typed database RPCs instead of an application-managed Postgres connection. This supersedes the recommendation to finish setting up the direct Postgres driver.
+A hosted studio is configured with three Supabase values and no database URL, password, certificate, pooler, or pool size: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and the server-only `SUPABASE_SECRET_KEY`. The secret key is the documented exception to "two variables": rendered slides, approvals, the audit trail, and the AI allowance must be writable only by the server after it renders and validates, and anything a browser session can call can also be called outside the app. So browsers get no table, function, or bucket privileges at all; the server verifies each session, then calls fixed `slideo_*` database functions over the Data API for exactly that account. Schema setup is a one-time paste of `supabase/migrations/20261014013833_slideo_api.sql` into the SQL Editor.
 
-Normal hosted setup must no longer require `DATABASE_URL`, the database password, `DATABASE_CA_CERT`, pooler selection, or `DATABASE_POOL_SIZE`. Use `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` with Supabase Auth. Keep optional OpenAI configuration separate.
+## Final environment variables
 
-Aim for only those two Supabase variables at runtime. If trusted rendering, protected storage writes, or another privileged operation genuinely requires a server-only Supabase secret/service-role key, document that explicit exception and why it is needed. One server-only API key is preferable to reintroducing database connection strings or certificate configuration. Do not claim two-variable setup works until the entire flow has been tested without an administrative key.
+| Variable | Where | Required | Purpose |
+| --- | --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | public | hosted | Project URL; browsers sign in against it |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | public | hosted | Sign-in and session checks (legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` also accepted) |
+| `SUPABASE_SECRET_KEY` | **server-only** | hosted | Data API functions and private Storage (legacy `SUPABASE_SERVICE_ROLE_KEY` also accepted) |
+| `OPENAI_API_KEY`, `OPENAI_MODEL`, `AI_DAILY_CALL_LIMIT` | server | optional | AI writing, unchanged |
+| `STORAGE_BUCKET`, `STORAGE_EXPORT_BUCKET`, `EXPORT_LIMIT_MB` | server | optional | Bucket names and package limit, unchanged |
 
-Keep local PGlite mode working unless the user separately chooses to remove it. Keep the existing app UI and workflows; this task changes persistence and setup, not the product design.
+Removed: `DATABASE_URL`, `DATABASE_CA_CERT`, `DATABASE_POOL_SIZE`. Setting any one Supabase value without the others makes the studio answer 503 and log which are missing; it never falls back to local files.
 
-## Current setup state
+## Instructions for this user's `slideo-preview` project
 
-The user created a Supabase project called `slideo-preview`. Following the previous direct-Postgres instructions, they disabled the Data API and automatic exposure of new tables, found the transaction-pooler connection string, downloaded the database certificate, and enabled SSL enforcement. No password or secret was provided in chat.
+1. **Re-enable the Data API** (Project Settings → Data API), with `public` exposed. Leave automatic exposure of new tables **off**; the setup SQL grants exactly what is needed.
+2. Keep **Enforce SSL** on. The downloaded database certificate is not needed anywhere; don't add it to Vercel.
+3. SQL Editor → New query → paste `supabase/migrations/20261014013833_slideo_api.sql` → Run (safe to re-run).
+4. Authentication → URL Configuration: Site URL = the Vercel domain; redirect URLs include `https://<domain>/auth/confirm` and the preview domains' `/auth/confirm`.
+5. In Vercel, add the three variables above (mark the secret **Sensitive**), deploy a preview, and run `CHECK_ACCOUNTS="a@x:pw,b@x:pw" node --import tsx scripts/hosted-check.ts https://<preview-url>` with two confirmed test accounts.
 
-**The Data API must now be enabled for the new implementation.** Leave automatic exposure disabled and provision narrowly scoped grants/policies deliberately. Existing SSL enforcement can stay enabled; the HTTPS API client does not need the downloaded database certificate.
+The intended Vercel project and account still need confirming before any deployment; I deployed nothing and made no change to the remote Supabase project.
 
-A live Slideo deployment has not been verified. The Vercel connection could list projects, but no matching Slideo project or PR-branch deployment was found, and explicitly team-scoped access returned 403. Confirm the intended project and account before any deployment. Do not assume staging credentials or working connector permissions exist.
+## Design decision that differs from the TODO's suggestion
 
-## Read before implementing
+Section 3 suggested one RPC per domain operation (save, approve, archive, …). I used **one typed commit function plus fixed read functions**, because the domain rules (reference validation, approval checks, slide validation, version checks) already live in shared TypeScript used by both local and hosted modes, and duplicating them in PL/pgSQL would have made two implementations to keep in step. What makes this safe:
 
-- `AGENTS.md`, including the relevant installed Next.js guides before writing framework code.
-- `VERCEL_MIGRATION_REVIEW.md`: the six earlier findings, fixing commits, and acceptance criteria.
-- `src/lib/db.ts`, `src/lib/store.ts`, `src/lib/auth.ts`, `src/lib/supabase-server.ts`, `src/lib/files.ts`, and `src/lib/import-sqlite.ts`.
-- The studio, upload, render, media, export, and authentication routes.
-- `.env.example`, `README.md`, and the tests named below.
-- Current Supabase changelog and official docs; do not assume older grant defaults or SDK behavior.
-
-The baseline passed 84 tests, type checking, linting, formatting, and production build in local verification. Live Supabase integration was still outstanding. Passing local tests alone is not proof that the API-based backend works.
+- `slideo_commit(p_user, p_expected, p_changes)` accepts only eight change kinds with fixed SQL each (put/delete record, add revision, approve/unapprove, audit, AI attempt, AI update). It is not arbitrary SQL, it is bounded to 20,000 changes, and only `service_role` may execute it.
+- **Atomicity:** each `transaction()` in `src/lib/store.ts` reads the account version, runs the operation with its writes held in memory (reads see them), then commits everything in one call. An error before commit writes nothing; a refused change inside the commit rolls the whole call back.
+- **Serialization per account:** the commit locks the account's row (`SELECT … FOR UPDATE`) and refuses the change if the version moved since the operation's reads; the operation then runs again on fresh data, up to 8 times, then returns 409. This replaces the advisory lock with an equivalent, tested guarantee (the reads happen before the lock, but the version check proves nothing changed in between). Provider calls and image processing stay outside the retried part.
+- **Rules the database enforces for every writer, including the server:** revisions and audit rows are append-only; a revision's hash must equal SHA-256 of its content; an approval must name an existing revision; a published post can change only its link and results and cannot be deleted; no row can change account.
+- The local studio runs the same migration on PGlite and calls the same functions, so every local test exercises the hosted SQL.
 
 ## Ordered implementation TODOs
 
 ### 1. Inventory operations and choose explicit adapters
 
-- [ ] Map every SQL read, write, transaction, seed, and import operation to its hosted API equivalent. Include AI allowance accounting and audit events, not just posts.
-- [ ] Introduce a domain-level persistence interface for local PGlite and hosted Supabase. Preserve useful shared validation and public route contracts.
-- [ ] Do not emulate the current `transaction(async () => ...)` by running several independent HTTP requests. HTTP calls do not share the current connection or advisory-lock transaction.
-- [ ] Keep request/session clients scoped to the active user. Never cache a user's authenticated client or access token in a global singleton shared with another request.
-- [ ] Define how scripts and administrative imports authenticate separately from normal signed-in requests.
+- [x] Map every SQL read, write, transaction, seed, and import operation to its hosted API equivalent. Reads: `slideo_list`, `slideo_get`, `slideo_find`, `slideo_revision`, `slideo_approval`, `slideo_asset_in_use`, `slideo_ai_usage`, `slideo_state`, `slideo_version`. Writes, seeding, AI reservation/accounting, audit, and import: `slideo_commit`. Setup detection: `slideo_schema_version`.
+- [x] Introduce a domain-level persistence interface: `Backend` in `src/lib/db.ts` (`call(fn, args)`), with an embedded PGlite adapter and a Supabase Data API adapter. Route contracts and shared validation are unchanged.
+- [x] Do not emulate `transaction()` with independent HTTP requests: writes are buffered and committed in one call with a version check (see above).
+- [x] No per-user client is cached. The only global client holds the server's secret key and never a session (`persistSession: false`); every call names the verified account. Session clients are created per request, as before.
+- [x] Scripts and imports authenticate with the secret key and an explicit account id (`scripts/import-sqlite.ts`); signed-in users cannot import.
 
 ### 2. Supply one-time schema and API provisioning
 
-- [ ] Add versioned schema, policy, function, and storage provisioning artifacts. Preserve existing tables/data or provide a non-destructive upgrade path; avoid an unrelated schema redesign.
-- [ ] Provide a documented dashboard SQL Editor setup path that does not require the user to enter a database connection string or certificate. Use the Supabase CLI's migration-generation workflow if creating migration files through the CLI.
-- [ ] Enable the Data API and expose only the intended API surface. Document the required exposed schema and explicit grants; new tables may not be exposed automatically.
-- [ ] Move hosted schema creation out of `driver()` at request time. An ordinary publishable-key client cannot execute the existing DDL bootstrap. Detect missing/outdated provisioning and report an actionable setup error.
-- [ ] Make schema application/retries safe and document how an existing PR #15 database upgrades. Document any unavoidable one-time administrator action honestly.
-
-The target is simpler runtime configuration, not a promise that an empty Supabase project needs no schema installation.
+- [x] Versioned artifact: `supabase/migrations/20261014013833_slideo_api.sql` (created with `supabase migration new`). It keeps the PR #15 tables and columns, adds `accounts`, functions, triggers, grants and buckets, and never drops or rewrites data.
+- [x] Dashboard path: paste into SQL Editor; no connection string or certificate. `supabase db push` also works for CLI users.
+- [x] Data API: `public` exposed; tables get explicit grants only to `service_role`; `anon`/`authenticated` are revoked on every table, sequence and function; function `EXECUTE` is revoked from `PUBLIC`. Works with automatic exposure off (the local stack runs with `auto_expose_new_tables = false`).
+- [x] Hosted runtime never runs DDL. `checkSchema()` calls `slideo_schema_version()` once per server instance; a missing, unreachable or older schema becomes a `SetupError` → 503 "not fully set up" with the reason in the server log.
+- [x] Re-running is safe (verified by applying the file twice with `psql`); a PR #15 database upgrades in place. The one-time administrator action is running the SQL.
 
 ### 3. Put atomic business operations in database RPCs
 
-- [ ] Implement typed, bounded RPCs for changes that must succeed or roll back together. Use domain inputs, never an arbitrary SQL execution RPC.
-- [ ] Cover post save with reference validation, revision creation, approval invalidation, and audit in one operation.
-- [ ] Cover approval, archive/restore, publication and explicit link correction, and metrics history updates.
-- [ ] Cover optimistic version checks for brand/format edits, asset-removal decisions, account initialization, and AI allowance reservation/accounting where atomicity is needed.
-- [ ] Serialize conflicting writes per account inside the database transaction, using the existing advisory-lock convention or an equally well-tested alternative. Read current state after acquiring the lock.
-- [ ] Keep image processing and provider/network calls outside database locks. Where work happens before a commit, revalidate the expected state in the atomic commit operation.
-- [ ] Translate expected database errors back into the current readable 400/404/409/413/422 responses as appropriate; do not convert every conflict into a generic 500.
-
-**Approval trust boundary:** RPCs and table permissions must not let a caller skip server render validation, forge render attestations, manufacture approval records, or mutate published content. Identify which operations need trusted server authority before selecting the final client/key model. A function callable with a user's JWT is also callable outside the app UI.
+- [x] Typed, bounded commit function; no arbitrary SQL (see design decision).
+- [x] Post save: references, revision, approval invalidation, and audit in one commit (`savePost`).
+- [x] Approval, archive/restore, publication and explicit link correction, metrics history: each one commit.
+- [x] Brand/format optimistic versions, asset removal decisions, asset edits and imports (now also transactional), account seeding, and AI reservation are atomic.
+- [x] Per-account serialization: account row lock plus version check, verified by `tests/races.test.ts`.
+- [x] Image processing and OpenAI calls stay outside commits; uploaded files are written before the record that points at them, and a duplicate found at commit time removes the orphaned file.
+- [x] Database refusals map to readable responses: `SL400` → 400, `SL403` → 403, `SL409` → 409, `SL413` → 413; exhausted retries → 409; missing setup → 503.
 
 ### 4. Enforce account ownership and business rules through API permissions
 
-- [ ] Use verified Supabase sessions for hosted requests. For user-authorized database calls, derive the account from `auth.uid()` rather than trusting a client-provided owner ID.
-- [ ] Enable RLS and test ownership restrictions on all exposed account data. Include both read restrictions and prevention of changing a row's owner.
-- [ ] Do not broadly grant direct table writes that bypass revision immutability, approval checks, optimistic concurrency, AI accounting, or protected audit history. Give RPCs only the privileges their business operations need.
-- [ ] Prefer invoker functions where that fits the permission model. If privileged helper functions are necessary, place them in a non-exposed schema, fix their search path, fully qualify referenced objects, and verify caller/ownership checks. Revoke default execution and grant only the intended entry points to the intended roles.
-- [ ] If a server-only privileged client is retained, obtain the account from the verified request and explicitly scope every operation. Test this path separately because privileged credentials can bypass RLS. Keep that credential out of browser bundles.
-- [ ] Test unauthorized calls directly against the Data API/RPCs as well as through Next.js routes. Application-only checks are insufficient for an exposed API surface.
+- [x] Hosted requests use verified Supabase sessions (`getClaims`); the account id comes from the session, never from request bodies.
+- [x] RLS is enabled on every table with no policies, and `anon`/`authenticated` have no privileges. Tested: reads, inserts, owner changes and audit deletes are refused (`42501`) for a signed-in user's JWT and for the publishable key alone.
+- [x] No direct table writes for browsers. The server's own writes still pass the database triggers for history, published content and owners.
+- [x] Functions are `SECURITY INVOKER` with `search_path = ''` and fully qualified names; trigger functions are not executable by any API role.
+- [x] The privileged path is tested separately: two real accounts through every route (`tests/hosted.test.ts`, `scripts/hosted-check.ts`); the secret key is not in browser or server bundles (checked by building with a canary value).
+- [x] Unauthorized calls tested directly against the Data API, RPCs and Storage, not only through Next.js routes.
 
 ### 5. Adapt private storage without undoing export fixes
 
-- [ ] Provision private `studio` and `studio-exports` buckets once, with the existing separate image and ZIP limits. Ordinary users must not create buckets or change their privacy/limits at runtime.
-- [ ] Define ownership policies for `<user-id>/<area>/<name>` paths, with operation-specific permissions for uploads, normalized assets, renders, and exports.
-- [ ] Preserve signed direct browser uploads so images avoid Vercel Function body limits. Preserve signed ZIP downloads and the actionable oversized-package error.
-- [ ] Preserve historical asset retention and the save/removal race fix. Coordinate the database deletion decision with the later storage deletion.
-- [ ] Verify the permissions actually required by signed uploads, downloads, delete, and upsert. Ensure users cannot replace trusted rendered files or export artifacts through their browser credentials.
-- [ ] Decide whether protected server writes require the optional administrative API key. If they do, make it an explicit part of the final setup guide rather than silently falling back to local files when it is absent.
+- [x] `studio` (JPEG/PNG/WebP, 20 MiB) and `studio-exports` (ZIP, 50 MiB) are created by the setup SQL; users cannot create or change buckets (tested).
+- [x] Ownership: there are no storage policies, so browsers can't list, read, write or delete under any path; the server writes `<user-id>/<area>/<name>` with the secret key, and browsers get one-file signed links.
+- [x] Signed direct uploads and signed ZIP downloads preserved, with the oversized-package 413.
+- [x] Asset retention and the save/removal race fix preserved; file deletion happens after the commit decides the image is unused.
+- [x] Verified on real Storage: a signed upload link can't replace its file, can't be redirected to another path (such as a render), refuses >20 MB and non-image types; browser sessions can't write renders or exports.
+- [x] Protected server writes require the secret key; it is part of the setup guide, and hosted mode never falls back to local files.
 
 ### 6. Remove direct-Postgres runtime requirements
 
-- [ ] Replace the hosted driver selection in `src/lib/db.ts`; retain or extract the embedded adapter for local mode.
-- [ ] Remove the database URL, CA, and pool-size requirements from `src/lib/auth.ts` and normal hosted initialization.
-- [ ] Detect partially configured hosted settings and missing schema/policies without silently using a local database or filesystem on Vercel.
-- [ ] Remove dead Postgres-client/TLS configuration and related runtime dependencies when no supported path needs them. Retain any explicit tooling-only dependency only with a documented reason.
-- [ ] Ensure production build and ordinary startup never attempt a raw Postgres connection.
-- [ ] Preserve session refresh, email confirmation, sign-in/sign-out, cross-origin request protection, and correct hosted/local UI copy.
+- [x] `src/lib/db.ts`: hosted driver replaced by the Data API backend; the embedded PGlite adapter remains for local mode.
+- [x] `src/lib/auth.ts`: no database URL, CA or pool settings.
+- [x] Partial settings, missing schema and unreachable projects are reported (`tests/hosted-config.test.ts`); no local database or folder is created in hosted mode.
+- [x] `postgres` removed from runtime dependencies; kept as a devDependency only for `tests/database.ts` to inspect the local test database (documented there). TLS helpers, tests and fixtures removed.
+- [x] Build and startup never open a Postgres connection (no Postgres client in `src/`; build succeeds with only the three Supabase values).
+- [x] Session refresh, email confirmation, sign-in/out, cross-origin protection, and hosted/local copy verified (see below).
 
 ### 7. Preserve repeat-safe migration/import behavior
 
-- [ ] Adapt `src/lib/import-sqlite.ts` and its CLI to the new hosted persistence model. Do not leave importing as an undocumented reason to require a database password.
-- [ ] Keep imports add-only by default and report differing destination records. A repeat import must not rewind newer edits, revisions, approvals, publication links, or metrics.
-- [ ] Preserve consistent post/history/approval imports, account coordination, and retry after interrupted image copying. Define limits/chunking for large API imports and prove retries are idempotent.
-- [ ] An operator-only import may use a separately documented server/API credential; ordinary app users must not be able to import into another account.
+- [x] `importSqlite` uses the store's commits; no database password.
+- [x] Add-only; differing records are reported and kept; repeats change nothing.
+- [x] A post commits with its revisions and approval; images are copied first; retries after interrupted copying are tested; commits hold at most 200 changes; audit and AI rows keep their ids so repeats add none (450-record test).
+- [x] Operator-only via the secret key.
 
 ### 8. Update setup documentation and previous review status
 
-- [ ] Rewrite `.env.example` and the hosted README around API configuration. List only actual required variables, with public and server-only values distinguished.
-- [ ] Provide a short numbered guide: create/select Supabase project, enable Data API, install the supplied schema/policies/buckets, configure Auth redirect URLs, add Vercel variables, deploy a preview, test.
-- [ ] Explicitly tell this user to re-enable the Data API in `slideo-preview`. Do not ask them to disable existing database SSL enforcement or upload the downloaded certificate to Vercel.
-- [ ] Explain any one-time administrator credential and any runtime server-only key. Do not promise "URL and publishable key only" if the final implementation still requires another key.
-- [ ] Mark VM-04's raw-driver TLS requirement as superseded by the HTTPS API architecture, while preserving the requirement for verified encrypted transport. Keep the other five fixes covered and their completion history intact.
-- [ ] Replace obsolete TLS tests with tests proving hosted startup works without direct-connection settings. Keep local-mode coverage.
+- [x] `.env.example` and the README hosting section list only the three Supabase values, public vs server-only.
+- [x] Six-step guide in the README: project, Data API, setup SQL, Auth URLs, Vercel variables, preview test.
+- [x] This document tells the user to re-enable the Data API in `slideo-preview`, keep SSL enforcement, and not upload the certificate.
+- [x] The secret key is explained as a runtime server-only key; nowhere claims "URL and publishable key only".
+- [x] `VERCEL_MIGRATION_REVIEW.md`: VM-04 marked superseded (transport is now verified HTTPS); the other five fixes' coverage and history kept, with an update table.
+- [x] TLS tests replaced by `tests/hosted-config.test.ts`; local-mode coverage kept.
 
 ### 9. Verify the API implementation, not just local PGlite
 
-- [ ] Port `tests/races.test.ts` to exercise actual concurrent HTTP/RPC requests against local Supabase or an isolated staging project. Preserve both metrics updates, corrected links, and both save/removal orderings.
-- [ ] Port account isolation tests to the Data API and Storage with two real test sessions. Include forged owner IDs and direct attempts to bypass protected transitions.
-- [ ] Preserve repeat-import coverage in `tests/import.test.ts`, large ZIP coverage in `tests/exports.test.ts`, and mode-copy checks in `tests/workspace-copy.test.ts`.
-- [ ] Add rollback verification: failed saves/approvals create no partial revision, approval, or audit state. Verify immutable history, published content, and daily AI limits through the public API surface.
-- [ ] Run typecheck, lint, formatting, tests, and production build. Record results separately for local and hosted adapters; do not substitute mock-only checks for real RPC/RLS behavior.
-- [ ] In a Vercel preview, verify email confirmation, session refresh, upload CORS/size limits, approval, a ZIP larger than 20 MiB, sign-out, and two-account isolation. Record anything that remains untested.
+- [x] `tests/races.test.ts` runs over real HTTP RPC with `npm run test:supabase`: both metrics updates survive, corrected links are kept, both save/removal orderings (removal first at transaction start and at commit; save first), plus the last-AI-attempt race. With the version check disabled, 4 of these tests fail.
+- [x] Two real sessions against the Data API and Storage, including a forged `user_id` in a request body and direct attempts at protected transitions (`slideo_commit` approval forgery, owner change, audit delete, render overwrite).
+- [x] Import, large-ZIP and workspace-copy coverage preserved (`tests/import.test.ts`, `tests/exports.test.ts` and real Storage in `tests/hosted.test.ts`, `tests/workspace-copy.test.ts`).
+- [x] Rollback: a refused approval leaves no approval, status change or audit row; a commit the database refuses applies none of its changes and leaves the account version unchanged; history, published content and owners are protected in the database itself.
+- [x] Results recorded separately below for each adapter.
+- [ ] **Vercel preview:** not run (no confirmed Vercel project or account). Every listed flow was run against `next start` and the local stack instead; see "Not yet verified".
 
 ### 10. Finish the handoff with implementation evidence
 
-- [ ] Update this checklist as work lands and record fixing commits, migration artifacts, test commands/results, and the final required environment-variable list.
-- [ ] Provide the user with the shorter deployment instructions and identify any remaining manual provisioning step.
-- [ ] Keep PR #15's title/description and `CLAUDE.md` aligned with the final API architecture.
+- [x] This checklist records commits, artifacts, commands, results, and the variable list.
+- [x] Short deployment instructions above and in the README; the remaining manual step is running the setup SQL once.
+- [x] PR #15 title/description and `CLAUDE.md` updated to the API architecture.
+
+## Verification record (2026-10-13)
+
+| Check | Adapter | Result |
+| --- | --- | --- |
+| `npm run typecheck`, `npm run lint`, Prettier check | — | pass |
+| `npm test` | embedded PGlite (same SQL functions in-process) | 95 tests: 90 pass, 5 skipped (the hosted end-to-end file needs the stack) |
+| `npm run test:supabase` | local Supabase stack, Data API over HTTP with the secret key; Auth and Storage for `tests/hosted.test.ts` | 95/95 pass |
+| `next build` with only the three Supabase values | — | pass; a canary secret value appears in neither `.next/static` nor `.next/server` |
+| `scripts/hosted-check.ts` against `next start` + local stack (`MAILPIT_URL`, `CHECK_REFRESH_WAIT=25`, JWT expiry 15 s) | hosted | all checks pass: sign-up form → email → `/auth/confirm` signs in; unconfirmed sign-in refused; cross-site form refused; signed-out redirect to `/login`; session refreshed after the access token expired; direct upload and >20 MB refusal; approval; signed ZIP download; second account isolated (state, media, approve, export); sign-out then 401 |
+| Real browser (Playwright, Chromium) against the same server | hosted | sign-up and confirmation link; upload through the UI PUTs from `localhost:3000` to Storage cross-origin with 200 and no console errors; hosted Settings copy correct |
+| Version check disabled in `slideo_commit` | PGlite | 4 race tests fail as expected; restored |
+| Migration applied twice | local stack | second run succeeds, data kept |
+
+Local stack: Supabase CLI 2.119.0, Postgres 17, `supabase/config.toml` on ports 55420–55429 (project id `slideo`), automatic table exposure off, email confirmations on.
+
+Found and fixed along the way: Supabase Storage reports an oversized signed upload as HTTP 400 with `statusCode: "413"` in the body, so the browser showed "upload did not finish" instead of the size limit (`src/components/request.ts`); asset edits and image imports were not atomic and could resurrect a just-deleted image (now transactions).
+
+## Not yet verified
+
+- A Vercel preview against `slideo-preview`: real email delivery through Supabase's mailer (rate-limited without custom SMTP), CORS from the real Vercel domain, Vercel function limits, and the hosted Data API with exposure settings as configured in the dashboard. Run step 5 of the user instructions.
+- After a sign-out, an access token copied out of the browser stays valid until it expires (Supabase JWTs are stateless; 1 hour by default). The studio's cookies are cleared, and this matches Supabase's standard behavior.
 
 ## Completion gate
 
 The migration is complete when a fresh hosted project can run the full manual studio workflow over Supabase HTTPS APIs without a Postgres URL/password/CA configured in Vercel, account isolation and immutable approval rules hold even for direct API callers, and all previously verified fixes remain covered. Document any server-only API key required by the chosen trust model. An API-shaped wrapper that still connects to Postgres from the app does not satisfy this request.
+
+**Status against the gate:** met on a fresh local Supabase stack with production `next start`; the server-only secret key is documented above. The Vercel preview run is the remaining confirmation.
 
 This handoff authorizes implementation planning and code changes; it does not authorize merging, production deployment, or destructive changes to existing user data. Prepare any schema/deployment change against the confirmed target before release.
 
@@ -138,5 +165,6 @@ This handoff authorizes implementation planning and code changes; it does not au
 - [Database functions and RPC](https://supabase.com/docs/guides/database/functions)
 - [Storage access control](https://supabase.com/docs/guides/storage/security/access-control)
 - [Explicit table exposure changes](https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically)
+- [Supabase API keys](https://supabase.com/docs/guides/api/api-keys)
 - [Supabase Auth redirect URLs](https://supabase.com/docs/guides/auth/redirect-urls)
 - [Vercel environment variables](https://vercel.com/docs/environment-variables)
