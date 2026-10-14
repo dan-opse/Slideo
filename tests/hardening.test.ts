@@ -8,10 +8,12 @@ import path from "node:path";
 import sharp from "sharp";
 import type { Asset, Brand, Format, Post } from "../src/lib/schema";
 import { seedSamplePost } from "./sample-post";
+import { closeTestDatabase, sql, useTestDatabase } from "./database";
 const folder = mkdtempSync(path.join(tmpdir(), "slideo-hardening-test-"));
 process.env.STUDIO_DATA_DIR = folder;
 delete process.env.OPENAI_API_KEY;
 const store = await import("../src/lib/store");
+await useTestDatabase();
 const { POST } = await import("../src/app/api/studio/route");
 const { GET: renderRoute } =
   await import("../src/app/api/render/[post]/[revision]/[slide]/route");
@@ -24,6 +26,7 @@ const { NextRequest } = await import("next/server");
 const sample = await seedSamplePost(store);
 after(async () => {
   await store.closeStore();
+  await closeTestDatabase();
   rmSync(folder, { recursive: true, force: true });
 });
 

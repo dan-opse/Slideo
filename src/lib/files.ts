@@ -1,6 +1,7 @@
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { hosted } from "./auth";
 import { dataDir } from "./db";
 
 // Keys are "<user>/<area>/<name>" (areas: assets, renders, uploads, exports).
@@ -158,21 +159,16 @@ export function supabaseStore(
 }
 
 let instance: FileStore | undefined;
+// Hosted studios keep files in Supabase Storage, written with the server's
+// secret key; there is no fallback to the local folder.
 export function files() {
-  if (instance) return instance;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL,
-    key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  instance =
-    url && key
-      ? supabaseStore(
-          import("@supabase/supabase-js").then(({ createClient }) =>
-            createClient(url, key, {
-              auth: { persistSession: false, autoRefreshToken: false },
-            }),
-          ),
-        )
-      : localStore();
-  return instance;
+  return (instance ??= hosted()
+    ? supabaseStore(
+        import("./supabase-admin").then(({ serviceClient }) =>
+          serviceClient(),
+        ),
+      )
+    : localStore());
 }
 // Tests swap in a store; undefined restores the configured one.
 export function useFiles(store: FileStore | undefined) {

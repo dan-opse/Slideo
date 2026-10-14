@@ -1,33 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { databaseTls } from "./db";
 
 // Without Supabase settings the studio is a single-user app on this computer.
 export const LOCAL_USER = "local";
 export type Account = { id: string; email: string | null };
 
+const publishableKey = () =>
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+// The server-only key. SUPABASE_SERVICE_ROLE_KEY is its legacy name.
+export const secretKey = () =>
+  process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+// The public pair that browsers and sessions use.
 export function supabaseConfig() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL,
-    key =
-      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    key = publishableKey();
   return url && key ? { url, key } : null;
 }
-export const hosted = () => !!supabaseConfig();
+// Any Supabase setting makes this a hosted studio, so a deployment missing
+// one of them is refused rather than quietly run on local files.
+export const hosted = () =>
+  !!(process.env.NEXT_PUBLIC_SUPABASE_URL || publishableKey() || secretKey());
 
-// Hosted mode fails closed: it never falls back to local storage or to an
-// unverified database connection.
-function hostedSettingsProblem() {
-  const missing = ["DATABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].filter(
-    (name) => !process.env[name],
-  );
-  if (missing.length) return `Hosted mode needs ${missing.join(" and ")}.`;
-  try {
-    databaseTls(process.env.DATABASE_URL!);
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  }
-  return null;
+// Hosted mode fails closed: it never falls back to local storage.
+export function hostedSettingsProblem() {
+  const missing = [
+    !process.env.NEXT_PUBLIC_SUPABASE_URL && "NEXT_PUBLIC_SUPABASE_URL",
+    !publishableKey() && "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+    !secretKey() && "SUPABASE_SECRET_KEY",
+  ].filter(Boolean);
+  return missing.length ? `Hosted mode needs ${missing.join(", ")}.` : null;
 }
 
 const deny = (error: string, status: number) =>

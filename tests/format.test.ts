@@ -12,13 +12,14 @@ import {
   slideStructure,
 } from "../src/lib/format-template";
 import { seedSamplePost } from "./sample-post";
+import { closeTestDatabase, sql, useTestDatabase } from "./database";
 const folder = mkdtempSync(path.join(tmpdir(), "slideo-format-test-"));
 process.env.STUDIO_DATA_DIR = folder;
 process.env.OPENAI_API_KEY = "test-key";
 process.env.AI_DAILY_CALL_LIMIT = "50";
 const store = await import("../src/lib/store");
+await useTestDatabase();
 const { POST } = await import("../src/app/api/studio/route");
-const { driver } = await import("../src/lib/db");
 const { NextRequest } = await import("next/server");
 const { renderAll } = await import("../src/lib/render");
 const { assertNewHooks, hookWritingInput, slideshowWritingInput } =
@@ -71,6 +72,7 @@ const request = (body: Record<string, unknown>) =>
   );
 after(async () => {
   await store.closeStore();
+  await closeTestDatabase();
   rmSync(folder, { recursive: true, force: true });
 });
 
@@ -276,9 +278,7 @@ test("OpenAI hooks use the prompt without fetching a website and record normaliz
     assert.equal((await response.json()).hooks.length, 10);
     assert.equal(calls, 1);
     assert.equal(await store.dailyUsage(), before + 1);
-    const [row] = await (
-      await driver()
-    ).query<{ status: string; usage: string }>(
+    const [row] = await sql<{ status: string; usage: string }>(
       "SELECT status,usage FROM ai_attempts ORDER BY at DESC LIMIT 1",
     );
     assert.equal(row.status, "complete");

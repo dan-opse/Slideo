@@ -155,12 +155,11 @@ async function importImage(
       throw unreadable();
     });
   const hash = digest(data);
-  const existing = (await list<Asset>("asset")).find(
-    (asset) =>
-      asset.hash === hash &&
-      asset.collection === fields.collection &&
-      !asset.removedAt,
-  );
+  const same = (asset: Asset) =>
+    asset.hash === hash &&
+    asset.collection === fields.collection &&
+    !asset.removedAt;
+  const existing = (await list<Asset>("asset")).find(same);
   if (existing) return { asset: existing, duplicate: true };
   const asset: Asset = {
     id: uid(),
@@ -172,10 +171,22 @@ async function importImage(
     hash,
     createdAt: now(),
   };
-  await files().write(fileKey("assets", `${asset.id}.jpg`), data, "image/jpeg");
-  await put("asset", asset);
-  await audit("asset.uploaded", asset.id);
-  return { asset, duplicate: false };
+  // The file goes first, so no library record ever points at a missing one.
+  const key = fileKey("assets", `${asset.id}.jpg`);
+  await files().write(key, data, "image/jpeg");
+  const result = await transaction(async () => {
+    const twin = (await list<Asset>("asset")).find(same);
+    if (twin) return { asset: twin, duplicate: true };
+    await put("asset", asset);
+    await audit("asset.uploaded", asset.id);
+    return { asset, duplicate: false };
+  });
+  // The same image arrived from another upload meanwhile.
+  if (result.duplicate)
+    await files()
+      .remove([key])
+      .catch(() => {});
+  return result;
 }
 
 // A multipart upload through this route (local studio and small files).
@@ -237,6 +248,8 @@ export async function GET(req: NextRequest) {
   try {
     return await withAccount(who, async () => NextResponse.json(await state()));
   } catch (e) {
+    if (e instanceof StudioError)
+      return NextResponse.json({ error: e.message }, { status: e.status });
     logUnexpected("Studio load", e);
     return NextResponse.json(
       { error: "The studio could not load. Try again." },
@@ -317,12 +330,17 @@ async function handle(action: string, input: Record<string, unknown>) {
   }
   if (action === "asset") {
     const id = z.string().parse(input.id);
-    const asset = await get<Asset>("asset", id);
     const data = assetUpdateSchema.parse(input.data);
-    const item = { ...asset, ...data };
-    await put("asset", item);
-    await audit("asset.updated", id);
-    return NextResponse.json(item);
+    // Read and written together, so an edit can't bring back an image that
+    // was deleted a moment earlier.
+    return NextResponse.json(
+      await transaction(async () => {
+        const item = { ...(await get<Asset>("asset", id)), ...data };
+        await put("asset", item);
+        await audit("asset.updated", id);
+        return item;
+      }),
+    );
   }
   if (action === "removeAsset") {
     const id = z.string().parse(input.id);

@@ -14,21 +14,27 @@ import path from "node:path";
 import sharp from "sharp";
 import type { Asset, Brand, Post } from "../src/lib/schema";
 import { seedSamplePost } from "./sample-post";
+import {
+  closeTestDatabase,
+  onSupabase,
+  sql,
+  useTestDatabase,
+} from "./database";
 const folder = mkdtempSync(path.join(tmpdir(), "slideo-import-test-"));
 process.env.STUDIO_DATA_DIR = path.join(folder, "studio");
 const store = await import("../src/lib/store");
-const { driver } = await import("../src/lib/db");
+await useTestDatabase();
 const { files } = await import("../src/lib/files");
 const { importSqlite } = await import("../src/lib/import-sqlite");
 after(async () => {
   await store.closeStore();
+  await closeTestDatabase();
   rmSync(folder, { recursive: true, force: true });
 });
 
 const as = <T>(id: string, fn: () => Promise<T>) =>
   store.withAccount({ id, email: null }, fn);
 const hashes = (post: Post) => post.slides.map((_, i) => `render-${i}`);
-const db = await driver();
 
 // Writes the "legacy" account's records into a database shaped like the
 // original SQLite studio, with its images in assets/.
@@ -41,9 +47,9 @@ CREATE TABLE revisions(post_id TEXT NOT NULL,revision INTEGER NOT NULL,json TEXT
 CREATE TABLE approvals(post_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,hash TEXT NOT NULL,render_hashes TEXT NOT NULL,created_at TEXT NOT NULL);
 CREATE TABLE audit(id TEXT PRIMARY KEY,action TEXT NOT NULL,entity TEXT NOT NULL,at TEXT NOT NULL);
 CREATE TABLE ai_attempts(id TEXT PRIMARY KEY,at TEXT NOT NULL,status TEXT NOT NULL,usage TEXT);`);
-  const copy = async (sql: string, insert: string) => {
-    for (const row of await db.query<Record<string, string | number | null>>(
-      sql,
+  const copy = async (select: string, insert: string) => {
+    for (const row of await sql<Record<string, string | number | null>>(
+      select,
       ["legacy"],
     ))
       old.prepare(insert).run(...Object.values(row));
@@ -169,7 +175,7 @@ test("importing again keeps everything done in the new studio since", async () =
       (await store.revisionContent(post.id, 2)).caption,
       "Rewritten caption",
     );
-    const [{ n }] = await db.query<{ n: number }>(
+    const [{ n }] = await sql<{ n: number }>(
       "SELECT COUNT(*)::int AS n FROM revisions WHERE user_id='dest' AND post_id=$1",
       [post.id],
     );
@@ -190,7 +196,7 @@ test("an import interrupted while copying images can be retried", async () => {
     store_.write = write;
   }
   // Nothing points at the missing image yet.
-  const [{ n }] = await db.query<{ n: number }>(
+  const [{ n }] = await sql<{ n: number }>(
     "SELECT COUNT(*)::int AS n FROM entities WHERE user_id='retry'",
   );
   assert.equal(n, 0);
@@ -208,4 +214,66 @@ test("an import interrupted while copying images can be retried", async () => {
       ),
     ),
   );
+});
+
+test("a large workspace imports in bounded commits, and a repeat adds nothing", async () => {
+  const dir = path.join(folder, "large");
+  mkdirSync(dir, { recursive: true });
+  const old = new DatabaseSync(path.join(dir, "studio.sqlite"));
+  old.exec(`CREATE TABLE entities(kind TEXT NOT NULL,id TEXT NOT NULL,json TEXT NOT NULL,PRIMARY KEY(kind,id));
+CREATE TABLE revisions(post_id TEXT NOT NULL,revision INTEGER NOT NULL,json TEXT NOT NULL,hash TEXT NOT NULL,PRIMARY KEY(post_id,revision));
+CREATE TABLE approvals(post_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,hash TEXT NOT NULL,render_hashes TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE TABLE audit(id TEXT PRIMARY KEY,action TEXT NOT NULL,entity TEXT NOT NULL,at TEXT NOT NULL);
+CREATE TABLE ai_attempts(id TEXT PRIMARY KEY,at TEXT NOT NULL,status TEXT NOT NULL,usage TEXT);`);
+  for (let i = 0; i < 450; i++) {
+    const id = `bulk-${i}`;
+    old
+      .prepare("INSERT INTO entities VALUES(?,?,?)")
+      .run("asset", id, JSON.stringify({ id, name: `Bulk ${i}` }));
+    old
+      .prepare("INSERT INTO audit VALUES(?,?,?,?)")
+      .run(`bulk-audit-${i}`, "asset.uploaded", id, "2026-01-01T00:00:00Z");
+    old
+      .prepare("INSERT INTO ai_attempts VALUES(?,?,?,?)")
+      .run(`bulk-ai-${i}`, "2026-01-01T00:00:00Z", "complete", "{}");
+  }
+  old.close();
+  const { backend, useBackend } = await import("../src/lib/db");
+  const real = await backend();
+  const sizes: number[] = [];
+  useBackend({
+    ...real,
+    call(fn, args) {
+      if (fn === "slideo_commit")
+        sizes.push((args.p_changes as unknown[]).length);
+      return real.call(fn, args);
+    },
+  });
+  try {
+    const report = await importSqlite(dir, "bulk");
+    assert.equal(report.added.asset, 450);
+    assert.ok(sizes.length >= 5 && Math.max(...sizes) <= 200, `${sizes}`);
+    const again = await importSqlite(dir, "bulk");
+    assert.deepEqual([again.added, again.kept], [{}, []]);
+  } finally {
+    useBackend(onSupabase ? real : undefined);
+  }
+  const count = async (table: string) =>
+    (
+      await sql<{ n: number }>(
+        `SELECT COUNT(*)::int AS n FROM ${table} WHERE user_id='bulk'`,
+      )
+    )[0].n;
+  assert.deepEqual(
+    [
+      await count("entities"),
+      await count("audit"),
+      await count("ai_attempts"),
+    ],
+    [450, 450, 450],
+  );
+  // Listed in their original order, newest first.
+  const listed = await as("bulk", () => store.list<{ id: string }>("asset"));
+  assert.equal(listed[0].id, "bulk-449");
+  assert.equal(listed.at(-1)!.id, "bulk-0");
 });

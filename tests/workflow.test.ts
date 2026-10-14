@@ -5,12 +5,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { seedSamplePost } from "./sample-post";
+import { closeTestDatabase, sql, useTestDatabase } from "./database";
 const folder = mkdtempSync(path.join(tmpdir(), "slideo-test-"));
 process.env.STUDIO_DATA_DIR = folder;
 const store = await import("../src/lib/store");
+await useTestDatabase();
 const { renderAll, renderSlide } = await import("../src/lib/render");
 const { authorize } = await import("../src/lib/auth");
-const { driver } = await import("../src/lib/db");
 const { NextRequest } = await import("next/server");
 const { GET: exportPackage } = await import("../src/app/api/export/[id]/route");
 const { POST: studioPost } = await import("../src/app/api/studio/route");
@@ -21,6 +22,7 @@ const { assertPublicWebsiteUrl, readWebsite } =
 const original = await seedSamplePost(store);
 after(async () => {
   await store.closeStore();
+  await closeTestDatabase();
   rmSync(folder, { recursive: true, force: true });
 });
 test("fresh workspaces start with a blank brand brief", async () => {
@@ -57,9 +59,7 @@ test("legacy format defaults above 10 migrate and record an audit event", async 
       .slideCount,
     10,
   );
-  const [audit] = await (
-    await driver()
-  ).query<{ count: number }>(
+  const [audit] = await sql<{ count: number }>(
     "SELECT COUNT(*)::int AS count FROM audit WHERE action=$1 AND entity=$2",
     ["format.slide_count_capped", format.id],
   );

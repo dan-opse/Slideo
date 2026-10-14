@@ -4,13 +4,18 @@
 //   node --import tsx scripts/import-sqlite.ts <old data folder> [account id]
 //
 // Without Supabase settings the target is the local studio. To fill a hosted
-// account, load the hosted settings and pass the account's Supabase user id:
+// account, load the hosted settings (NEXT_PUBLIC_SUPABASE_URL,
+// NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY and the server-only
+// SUPABASE_SECRET_KEY; no database password) and pass the account's
+// Supabase user id, from Authentication → Users:
 //
 //   node --env-file=.env.production.local --import tsx \
 //     scripts/import-sqlite.ts ./data 2f1c…-user-uuid
 //
-// The import only adds records. Anything the account already has is left as
-// it is and listed, so running it again never undoes later work.
+// Only someone holding the secret key can run it; a signed-in user cannot
+// import into any account. The import only adds records. Anything the
+// account already has is left as it is and listed, so running it again
+// never undoes later work, and a run that stopped partway can be repeated.
 import { closeDatabase } from "../src/lib/db";
 import { hosted, LOCAL_USER } from "../src/lib/auth";
 import { importSqlite } from "../src/lib/import-sqlite";

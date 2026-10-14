@@ -1,158 +1,196 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { hosted } from "./auth";
 
 export type Row = Record<string, unknown>;
-// One connection's worth of SQL: `query` takes a single statement with $n
-// parameters; `exec` runs a parameterless script of several statements.
+// One connection's worth of SQL on the embedded database.
 export type Runner = {
   query<T = Row>(text: string, params?: unknown[]): Promise<T[]>;
   exec(text: string): Promise<void>;
 };
-export type Driver = Runner & {
-  transaction<T>(fn: (tx: Runner) => Promise<T>): Promise<T>;
+
+// The studio reads and writes only through the slideo_* database functions
+// in supabase/migrations: over HTTPS (Supabase's Data API) when hosted, and
+// in-process on the embedded database otherwise. Both run the same SQL.
+const ARGS = {
+  slideo_schema_version: {},
+  slideo_version: { p_user: "text" },
+  slideo_list: { p_user: "text", p_kind: "text" },
+  slideo_get: { p_user: "text", p_kind: "text", p_id: "text" },
+  slideo_find: { p_user: "text", p_keys: "jsonb" },
+  slideo_revision: { p_user: "text", p_post: "text", p_revision: "integer" },
+  slideo_approval: { p_user: "text", p_post: "text" },
+  slideo_asset_in_use: { p_user: "text", p_asset: "text" },
+  slideo_ai_usage: { p_user: "text", p_since: "text" },
+  slideo_state: { p_user: "text", p_since: "text" },
+  slideo_commit: { p_user: "text", p_expected: "bigint", p_changes: "jsonb" },
+} as const;
+export type DbFunction = keyof typeof ARGS;
+export type Backend = {
+  call<T>(fn: DbFunction, args: Record<string, unknown>): Promise<T>;
   close(): Promise<void>;
 };
+
+// The slideo_schema_version() the migrations in this release install.
+export const SCHEMA_VERSION = 1;
+
+// An error the database raised, with its SQLSTATE. The slideo functions use
+// SL400, SL403, SL409 and SL413 for changes they refuse.
+export class DatabaseError extends Error {
+  constructor(
+    message: string,
+    public code?: string,
+  ) {
+    super(message);
+  }
+}
+// The hosted database is missing, unreachable, or lacks the setup SQL.
+export class SetupError extends Error {}
 
 export const dataDir = path.resolve(
   /* turbopackIgnore: true */ process.env.STUDIO_DATA_DIR || "./data",
 );
-
-const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
-const INSECURE_MODES = new Set(["disable", "allow", "prefer"]);
-// The TLS settings for a DATABASE_URL. Remote databases always get an
-// encrypted connection that verifies the server's certificate, against
-// DATABASE_CA_CERT (Supabase: Database settings → SSL configuration) or,
-// when the URL says sslrootcert=system, the system's trusted roots. The URL's
-// own sslmode never weakens this: postgres.js would treat sslmode=require as
-// "encrypt without verifying". Only a database on this machine may skip TLS.
-export function databaseTls(
-  url: string,
-  env: Record<string, string | undefined> = process.env,
-): false | { rejectUnauthorized: true; ca?: string } {
-  const { hostname, searchParams } = new URL(url);
-  const mode = searchParams.get("sslmode");
-  const ca = env.DATABASE_CA_CERT?.replace(/\\n/g, "\n").trim();
-  const verified = { rejectUnauthorized: true as const, ...(ca ? { ca } : {}) };
-  if (LOOPBACK.has(hostname))
-    return !mode || mode === "disable" ? false : verified;
-  if (mode && INSECURE_MODES.has(mode))
-    throw new Error(
-      `DATABASE_URL sets sslmode=${mode}. Remote databases need verified TLS: remove sslmode or use sslmode=verify-full.`,
-    );
-  if (!ca && searchParams.get("sslrootcert") !== "system")
-    throw new Error(
-      "Set DATABASE_CA_CERT to your Supabase project's CA certificate (Database settings → SSL configuration), or add sslrootcert=system to DATABASE_URL if its certificate is publicly trusted.",
-    );
-  return verified;
+const migrations = path.resolve(
+  /* turbopackIgnore: true */ "supabase/migrations",
+);
+function migrationSql() {
+  return readdirSync(migrations)
+    .filter((name) => name.endsWith(".sql"))
+    .sort()
+    .map((name) => readFileSync(path.join(migrations, name), "utf8"))
+    .join("\n");
 }
 
-// Hosted deployments connect to Postgres (Supabase's transaction pooler on
-// Vercel). Without DATABASE_URL the studio runs an embedded Postgres in the
-// data folder, so local use and tests need no database server.
-async function postgresDriver(url: string): Promise<Driver> {
-  const { default: postgres } = await import("postgres");
-  const ssl = databaseTls(url);
-  // databaseTls has read the TLS parameters; postgres.js would send ones it
-  // doesn't know (sslrootcert) to the server, which rejects them.
-  const target = new URL(url);
-  target.searchParams.delete("sslmode");
-  target.searchParams.delete("sslrootcert");
-  // The transaction pooler cannot keep prepared statements between calls.
-  const sql = postgres(target.href, {
-    ssl,
-    prepare: false,
-    max: Number(process.env.DATABASE_POOL_SIZE || 3),
-    idle_timeout: 20,
-    onnotice: () => {},
-  });
-  type Sql = typeof sql;
-  const runner = (s: Sql): Runner => ({
-    query: (text, params = []) =>
-      s.unsafe(text, params as never[]) as unknown as Promise<never[]>,
-    exec: async (text) => {
-      await s.unsafe(text);
-    },
-  });
+type PG = import("@electric-sql/pglite").PGlite;
+let local: Promise<PG> | undefined;
+// The local studio's embedded Postgres in the data folder. Opened on first
+// use rather than at import, so `next build` never creates a database. A
+// database without this release's functions gets the migrations, which only
+// add what is missing.
+function embedded() {
+  return (local ??= (async () => {
+    const { PGlite } = await import("@electric-sql/pglite");
+    const folder = path.join(dataDir, "pglite");
+    mkdirSync(folder, { recursive: true });
+    const db = await PGlite.create(folder);
+    const [found] = (
+      await db.query<{ ok: boolean }>(
+        "SELECT to_regproc('public.slideo_schema_version') IS NOT NULL AS ok",
+      )
+    ).rows;
+    const version = found.ok
+      ? (
+          await db.query<{ v: number }>(
+            "SELECT public.slideo_schema_version() AS v",
+          )
+        ).rows[0].v
+      : null;
+    if (version !== SCHEMA_VERSION)
+      await db.transaction((tx) => tx.exec(migrationSql()));
+    return db;
+  })().catch((error) => {
+    local = undefined;
+    throw error;
+  }));
+}
+// Direct SQL on the embedded database, for tests and diagnostics.
+export async function driver(): Promise<Runner> {
+  const db = await embedded();
   return {
-    ...runner(sql),
-    transaction: (fn) =>
-      sql.begin((tx) => fn(runner(tx as unknown as Sql))) as Promise<never>,
-    close: () => sql.end(),
-  };
-}
-
-async function embeddedDriver(): Promise<Driver> {
-  const { PGlite } = await import("@electric-sql/pglite");
-  const folder = path.join(dataDir, "pglite");
-  mkdirSync(folder, { recursive: true });
-  const db = await PGlite.create(folder);
-  type Q = Pick<typeof db, "query" | "exec">;
-  const runner = (q: Q): Runner => ({
     query: async (text, params = []) =>
-      (await q.query(text, params)).rows as never[],
+      (await db.query(text, params)).rows as never[],
     exec: async (text) => {
-      await q.exec(text);
+      await db.exec(text);
     },
-  });
-  return {
-    ...runner(db),
-    transaction: (fn) => db.transaction((tx) => fn(runner(tx))),
-    close: () => db.close(),
   };
 }
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS entities(user_id TEXT NOT NULL,kind TEXT NOT NULL,id TEXT NOT NULL,json TEXT NOT NULL,seq BIGSERIAL,PRIMARY KEY(user_id,kind,id));
-CREATE TABLE IF NOT EXISTS revisions(user_id TEXT NOT NULL,post_id TEXT NOT NULL,revision INTEGER NOT NULL,json TEXT NOT NULL,hash TEXT NOT NULL,PRIMARY KEY(user_id,post_id,revision));
-CREATE TABLE IF NOT EXISTS approvals(user_id TEXT NOT NULL,post_id TEXT NOT NULL,revision INTEGER NOT NULL,hash TEXT NOT NULL,render_hashes TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(user_id,post_id));
-CREATE TABLE IF NOT EXISTS audit(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,action TEXT NOT NULL,entity TEXT NOT NULL,at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS ai_attempts(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,at TEXT NOT NULL,status TEXT NOT NULL,usage TEXT);
-CREATE INDEX IF NOT EXISTS ai_attempts_user_at ON ai_attempts(user_id,at);
-CREATE INDEX IF NOT EXISTS audit_user ON audit(user_id);
--- The server connects as the database owner and scopes every query to the
--- signed-in user. With RLS on and no policies, Supabase's public REST API
--- (anon and authenticated keys) can read none of these tables.
-ALTER TABLE entities ENABLE ROW LEVEL SECURITY;
-ALTER TABLE revisions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE approvals ENABLE ROW LEVEL SECURITY;
-ALTER TABLE audit ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ai_attempts ENABLE ROW LEVEL SECURITY;
-`;
-
-// The schema script runs in one transaction, so tables with RLS on mean
-// every statement in it has applied.
-const TABLES = ["entities", "revisions", "approvals", "audit", "ai_attempts"];
-async function schemaReady(db: Runner) {
-  const [row] = await db.query<{ n: number }>(
-    "SELECT COUNT(*)::int AS n FROM pg_class c JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname=current_schema() AND c.relname=ANY($1) AND c.relrowsecurity",
-    [TABLES],
-  );
-  return row.n === TABLES.length;
+function embeddedBackend(): Backend {
+  return {
+    async call<T>(fn: DbFunction, args: Record<string, unknown>) {
+      const types: Record<string, string> = ARGS[fn];
+      const names = Object.keys(args);
+      for (const name of names)
+        if (!types[name]) throw new Error(`${fn} has no argument ${name}`);
+      // Every value travels as text and is cast to the argument's type.
+      const list = names.map((n, i) => `${n} => $${i + 1}::text::${types[n]}`);
+      const params = names.map((n) => {
+        const value = args[n];
+        if (value === null || value === undefined) return null;
+        return types[n] === "jsonb" ? JSON.stringify(value) : String(value);
+      });
+      const db = await embedded();
+      try {
+        const { rows } = await db.query<{ result: T }>(
+          `SELECT public.${fn}(${list.join(",")}) AS result`,
+          params,
+        );
+        return rows[0].result;
+      } catch (error) {
+        const e = error as { message?: string; code?: string };
+        throw new DatabaseError(e.message ?? String(error), e.code);
+      }
+    },
+    close: closeEmbedded,
+  };
+}
+async function closeEmbedded() {
+  const current = local;
+  local = undefined;
+  if (current) await (await current.catch(() => null))?.close();
 }
 
-let instance: Promise<Driver> | undefined;
-// Opened on first use rather than at import, so `next build` (which imports
-// route modules to collect page data) never connects or creates a database.
-export function driver() {
+// The hosted backend: the Data API, called with the server's secret key.
+export function supabaseBackend(client: SupabaseClient): Backend {
+  return {
+    async call<T>(fn: DbFunction, args: Record<string, unknown>) {
+      const { data, error } = await client.rpc(fn, args);
+      if (error) throw new DatabaseError(error.message, error.code);
+      return data as T;
+    },
+    close: async () => {},
+  };
+}
+// Hosted studios never create tables at runtime: the publishable and secret
+// API keys cannot run DDL, and setup is a deliberate one-time step. A
+// project without the setup SQL, or with an older version of it, is
+// reported instead of used.
+export async function checkSchema(db: Backend) {
+  let version: unknown;
+  try {
+    version = await db.call("slideo_schema_version", {});
+  } catch (error) {
+    throw new SetupError(
+      `Slideo's database functions are not reachable (${error instanceof Error ? error.message : String(error)}). Enable the Data API and run the files in supabase/migrations in the Supabase SQL Editor.`,
+    );
+  }
+  if (Number(version) !== SCHEMA_VERSION)
+    throw new SetupError(
+      `The Supabase project has Slideo schema version ${String(version)}; this release needs ${SCHEMA_VERSION}. Run the files in supabase/migrations in the Supabase SQL Editor.`,
+    );
+}
+
+let instance: Promise<Backend> | undefined;
+let override: Backend | undefined;
+export function backend(): Promise<Backend> {
+  if (override) return Promise.resolve(override);
   return (instance ??= (async () => {
-    const url = process.env.DATABASE_URL;
-    const db = url ? await postgresDriver(url) : await embeddedDriver();
-    // Concurrent cold starts take turns creating the schema. A later one must
-    // not run the script again: its ALTER TABLE locks would deadlock with
-    // requests already writing rows.
-    if (!(await schemaReady(db)))
-      await db.transaction(async (tx) => {
-        await tx.query("SELECT pg_advisory_xact_lock(7243001)");
-        if (!(await schemaReady(tx))) await tx.exec(SCHEMA);
-      });
+    if (!hosted()) return embeddedBackend();
+    const { serviceClient } = await import("./supabase-admin");
+    const db = supabaseBackend(serviceClient());
+    await checkSchema(db);
     return db;
   })().catch((error) => {
     instance = undefined;
     throw error;
   }));
 }
+// Tests swap in a backend; undefined restores the configured one.
+export function useBackend(db: Backend | undefined) {
+  override = db;
+}
 export async function closeDatabase() {
-  const current = instance;
   instance = undefined;
-  if (current) await (await current).close();
+  await closeEmbedded();
 }

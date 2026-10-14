@@ -7,10 +7,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import type { Asset, Brand, Format, Post, Slide } from "../src/lib/schema";
+import { closeTestDatabase, sql, useTestDatabase } from "./database";
 const folder = mkdtempSync(path.join(tmpdir(), "slideo-review-test-"));
 process.env.STUDIO_DATA_DIR = folder;
 delete process.env.OPENAI_API_KEY;
 const store = await import("../src/lib/store");
+await useTestDatabase();
 const { POST } = await import("../src/app/api/studio/route");
 const { GET: exportRoute } = await import("../src/app/api/export/[id]/route");
 const { GET: renderRoute } =
@@ -35,6 +37,7 @@ const { logUnexpected } = await import("../src/lib/log");
 const { NextRequest } = await import("next/server");
 after(async () => {
   await store.closeStore();
+  await closeTestDatabase();
   rmSync(folder, { recursive: true, force: true });
 });
 

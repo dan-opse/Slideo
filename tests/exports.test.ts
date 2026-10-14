@@ -9,9 +9,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import type { Post } from "../src/lib/schema";
+import { closeTestDatabase, sql, useTestDatabase } from "./database";
 const folder = mkdtempSync(path.join(tmpdir(), "slideo-exports-test-"));
 process.env.STUDIO_DATA_DIR = folder;
 const store = await import("../src/lib/store");
+await useTestDatabase();
 const { supabaseStore, useFiles, UPLOAD_BYTES } =
   await import("../src/lib/files");
 const { POST } = await import("../src/app/api/studio/route");
@@ -20,6 +22,7 @@ const { NextRequest } = await import("next/server");
 after(async () => {
   useFiles(undefined);
   await store.closeStore();
+  await closeTestDatabase();
   rmSync(folder, { recursive: true, force: true });
 });
 

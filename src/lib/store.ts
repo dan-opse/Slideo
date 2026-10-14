@@ -1,7 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { slideAssetIds, visibleAssetIds } from "./format-template";
-import { closeDatabase, driver, type Runner } from "./db";
+import {
+  backend,
+  closeDatabase,
+  DatabaseError,
+  SetupError,
+  type DbFunction,
+} from "./db";
 import { hosted, LOCAL_USER, type Account } from "./auth";
 import type {
   Asset,
@@ -13,9 +19,49 @@ import type {
 } from "./schema";
 export { dataDir } from "./db";
 
-// Every query runs for one account. Route handlers enter its scope through
-// withAccount; inside a transaction, queries also share its connection.
-type Scope = { account: Account; tx?: Runner };
+// One change in an account's commit; see slideo_commit in supabase/migrations.
+export type Change =
+  | { op: "put"; kind: string; id: string; json: string }
+  | { op: "delete"; kind: string; id: string }
+  | {
+      op: "revision";
+      post: string;
+      revision: number;
+      json: string;
+      hash: string;
+    }
+  | {
+      op: "approve";
+      post: string;
+      revision: number;
+      hash: string;
+      render_hashes: string;
+      at: string;
+    }
+  | { op: "unapprove"; post: string }
+  | { op: "audit"; id: string; action: string; entity: string; at: string }
+  | {
+      op: "ai";
+      id: string;
+      at: string;
+      status: string;
+      usage?: string | null;
+    }
+  | { op: "ai_update"; id: string; status: string; usage: string };
+type Approval = { revision: number; hash: string; render_hashes: string };
+// A transaction's changes wait here until it commits. Its own reads see
+// them, as they would inside a database transaction.
+type Tx = {
+  changes: Change[];
+  entities: Map<string, string | null>;
+  revisions: Map<string, string>;
+  approvals: Map<string, Approval | null>;
+  aiAttempts: number;
+};
+
+// Every read and write is for one account. Route handlers enter its scope
+// through withAccount; a transaction adds its pending changes to the scope.
+type Scope = { account: Account; tx?: Tx };
 const scope = new AsyncLocalStorage<Scope>();
 function current(): Scope {
   const active = scope.getStore();
@@ -42,27 +88,107 @@ export async function withAccount<T>(
     return fn();
   });
 }
-async function runner() {
-  return current().tx ?? (await driver());
+// Acts for an account without preparing its workspace (operator imports).
+export function asAccount<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  return scope.run({ account: { id, email: null } }, fn);
 }
-async function query<T = Record<string, unknown>>(
-  text: string,
-  params: unknown[] = [],
-) {
+
+export class StudioError extends Error {
+  constructor(
+    message: string,
+    public status = 400,
+  ) {
+    super(message);
+  }
+}
+// Changes the database refuses become the studio's own errors; a missing
+// hosted setup is reported to the operator's log and as a 503.
+const refused: Record<string, number> = {
+  SL400: 400,
+  SL403: 403,
+  SL409: 409,
+  SL413: 413,
+};
+function translate(error: unknown): unknown {
+  if (error instanceof SetupError) {
+    console.error(error.message);
+    return new StudioError(
+      "The studio is not fully set up yet. Its operator needs to finish the Supabase setup.",
+      503,
+    );
+  }
+  if (error instanceof DatabaseError && error.code && refused[error.code]) {
+    const text = error.message.replace(/^slideo: /, "");
+    return new StudioError(
+      `${text.charAt(0).toUpperCase()}${text.slice(1)}.`,
+      refused[error.code],
+    );
+  }
+  return error;
+}
+async function rpc<T>(fn: DbFunction, args: Record<string, unknown>) {
+  try {
+    return await (await backend()).call<T>(fn, args);
+  } catch (error) {
+    throw translate(error);
+  }
+}
+async function call<T>(fn: DbFunction, args: Record<string, unknown> = {}) {
   // Outside a request (scripts, tests) the local studio seeds on first use.
   if (!scope.getStore()) await ensureWorkspace();
-  return (await runner()).query<T>(text, params);
+  return rpc<T>(fn, { p_user: userId(), ...args });
 }
+// Inside a transaction a change waits for its commit; outside, it commits
+// on its own.
+async function write(change: Change) {
+  const tx = current().tx;
+  if (!tx) {
+    if (!scope.getStore()) await ensureWorkspace();
+    await rpc("slideo_commit", {
+      p_user: userId(),
+      p_expected: null,
+      p_changes: [change],
+    });
+    return;
+  }
+  tx.changes.push(change);
+  if (change.op === "put")
+    tx.entities.set(`${change.kind}/${change.id}`, change.json);
+  if (change.op === "delete") tx.entities.set(`${change.kind}/${change.id}`, null);
+  if (change.op === "revision")
+    tx.revisions.set(`${change.post}/${change.revision}`, change.json);
+  if (change.op === "approve") tx.approvals.set(change.post, change);
+  if (change.op === "unapprove") tx.approvals.set(change.post, null);
+  if (change.op === "ai") tx.aiAttempts++;
+}
+// Operator imports add history rows with their original ids and times.
+export const stage = write;
 
 export const uid = () => randomUUID();
 export const now = () => new Date().toISOString();
 export async function list<T>(kind: string): Promise<T[]> {
-  return (
-    await query<{ json: string }>(
-      "SELECT json FROM entities WHERE user_id=$1 AND kind=$2 ORDER BY seq DESC",
-      [userId(), kind],
-    )
-  ).map((r) => JSON.parse(r.json));
+  const rows = await call<T[]>("slideo_list", { p_kind: kind });
+  const tx = current().tx;
+  const prefix = `${kind}/`;
+  const pending = new Map(
+    [...(tx?.entities ?? [])]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([key, json]) => [key.slice(prefix.length), json]),
+  );
+  if (!pending.size) return rows;
+  const kept = rows.flatMap((row) => {
+    const id = (row as { id: string }).id;
+    if (!pending.has(id)) return [row];
+    const json = pending.get(id);
+    pending.delete(id);
+    return json === null ? [] : [JSON.parse(json!) as T];
+  });
+  // Records this transaction adds are the newest.
+  const added = [...pending.values()]
+    .filter((json): json is string => json !== null)
+    .map((json) => JSON.parse(json) as T)
+    .reverse();
+  return [...added, ...kept];
 }
 const missing: Record<string, string> = {
   brand: "That brand brief no longer exists. Reload the studio.",
@@ -71,18 +197,16 @@ const missing: Record<string, string> = {
   asset: "That image is not in your library. Choose another image.",
 };
 export async function get<T>(kind: string, id: string): Promise<T> {
-  const [row] = await query<{ json: string }>(
-    "SELECT json FROM entities WHERE user_id=$1 AND kind=$2 AND id=$3",
-    [userId(), kind, id],
-  );
-  if (!row) throw new StudioError(missing[kind] ?? "Not found.", 404);
-  return JSON.parse(row.json);
+  const tx = current().tx,
+    key = `${kind}/${id}`;
+  const found = tx?.entities.has(key)
+    ? tx.entities.get(key) && (JSON.parse(tx.entities.get(key)!) as T)
+    : await call<T | null>("slideo_get", { p_kind: kind, p_id: id });
+  if (!found) throw new StudioError(missing[kind] ?? "Not found.", 404);
+  return found;
 }
 export async function put<T extends { id: string }>(kind: string, item: T) {
-  await query(
-    "INSERT INTO entities(user_id,kind,id,json) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,kind,id) DO UPDATE SET json=excluded.json",
-    [userId(), kind, item.id, JSON.stringify(item)],
-  );
+  await write({ op: "put", kind, id: item.id, json: JSON.stringify(item) });
 }
 const changed: Record<string, string> = {
   brand: "This brand brief changed in another window. Reload before saving.",
@@ -102,40 +226,52 @@ export async function nextVersion(
   return current + 1;
 }
 export async function remove(kind: string, id: string) {
-  await query("DELETE FROM entities WHERE user_id=$1 AND kind=$2 AND id=$3", [
-    userId(),
-    kind,
-    id,
-  ]);
+  await write({ op: "delete", kind, id });
 }
 export async function audit(action: string, id: string) {
-  await query("INSERT INTO audit VALUES($1,$2,$3,$4,$5)", [
-    uid(),
-    userId(),
-    action,
-    id,
-    now(),
-  ]);
+  await write({ op: "audit", id: uid(), action, entity: id, at: now() });
 }
-export class StudioError extends Error {
-  constructor(
-    message: string,
-    public status = 400,
-  ) {
-    super(message);
-  }
-}
-// Nested calls join the outermost transaction; its rollback undoes everything.
-// Each account's writes are serialized, as a single SQLite writer once did.
+
+const ATTEMPTS = 8;
+// Runs fn as one atomic change to the account. Its reads go to the
+// database; its writes are held until fn finishes, then committed together
+// with the account version read before fn started. Another change committed
+// in the meantime makes the commit fail without writing anything, and fn
+// runs again on the newer data, so an account's changes apply one at a time
+// as if each held a lock. An error thrown by fn writes nothing. fn may run
+// more than once: keep slow work and side effects (provider calls, image
+// processing, file deletion) outside it, and check their results inside.
+// Nested calls join the outermost transaction.
 export async function transaction<T>(fn: () => Promise<T>): Promise<T> {
   const active = current();
   if (active.tx) return fn();
-  return (await driver()).transaction(async (tx) => {
-    await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
-      active.account.id,
-    ]);
-    return scope.run({ ...active, tx }, fn);
-  });
+  const user = active.account.id;
+  for (let attempt = 1; ; attempt++) {
+    const version = Number(await rpc("slideo_version", { p_user: user }));
+    const tx: Tx = {
+      changes: [],
+      entities: new Map(),
+      revisions: new Map(),
+      approvals: new Map(),
+      aiAttempts: 0,
+    };
+    const result = await scope.run({ ...active, tx }, fn);
+    if (!tx.changes.length) return result;
+    const done = await rpc<{ ok: boolean }>("slideo_commit", {
+      p_user: user,
+      p_expected: version,
+      p_changes: tx.changes,
+    });
+    if (done.ok) return result;
+    if (attempt === ATTEMPTS)
+      throw new StudioError(
+        "Your studio was busy saving other changes. Try again.",
+        409,
+      );
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.random() * 15 * attempt),
+    );
+  }
 }
 export function digest(value: string | Buffer) {
   return createHash("sha256").update(value).digest("hex");
@@ -172,13 +308,16 @@ export async function savePost(
   expected?: number,
 ): Promise<Post> {
   return transaction(async () => {
-    // References are checked under the lock that image removal also takes,
-    // so a revision can never point at an image deleted a moment earlier.
+    // References are checked in the same transaction that image removal
+    // commits through, so a revision can never point at an image deleted a
+    // moment earlier.
     await get<Brand>("brand", content.brandId);
     await get<Format>("format", content.formatId);
-    for (const slide of content.slides)
-      for (const asset of slideAssetIds(slide))
-        await get<Asset>("asset", asset);
+    await Promise.all(
+      content.slides.flatMap((slide) =>
+        slideAssetIds(slide).map((asset) => get<Asset>("asset", asset)),
+      ),
+    );
     const old = id ? await get<Post>("post", id) : undefined;
     if (old && old.revision !== expected)
       throw new StudioError(
@@ -199,17 +338,15 @@ export async function savePost(
       updatedAt: now(),
     };
     await put("post", post);
-    await query("INSERT INTO revisions VALUES($1,$2,$3,$4,$5)", [
-      userId(),
-      post.id,
-      post.revision,
-      JSON.stringify(content),
-      digest(JSON.stringify(content)),
-    ]);
-    await query("DELETE FROM approvals WHERE user_id=$1 AND post_id=$2", [
-      userId(),
-      post.id,
-    ]);
+    const json = JSON.stringify(content);
+    await write({
+      op: "revision",
+      post: post.id,
+      revision: post.revision,
+      json,
+      hash: digest(json),
+    });
+    await write({ op: "unapprove", post: post.id });
     await audit(old ? "post.revised" : "post.created", post.id);
     return post;
   });
@@ -218,12 +355,20 @@ export async function revisionContent(
   id: string,
   revision: number,
 ): Promise<PostContent> {
-  const [row] = await query<{ json: string }>(
-    "SELECT json FROM revisions WHERE user_id=$1 AND post_id=$2 AND revision=$3",
-    [userId(), id, revision],
-  );
-  if (!row) throw new StudioError("Revision not found", 404);
-  return JSON.parse(row.json);
+  const pending = current().tx?.revisions.get(`${id}/${revision}`);
+  const content = pending
+    ? (JSON.parse(pending) as PostContent)
+    : await call<PostContent | null>("slideo_revision", {
+        p_post: id,
+        p_revision: revision,
+      });
+  if (!content) throw new StudioError("Revision not found", 404);
+  return content;
+}
+async function approval(id: string) {
+  const tx = current().tx;
+  if (tx?.approvals.has(id)) return tx.approvals.get(id) ?? null;
+  return call<Approval | null>("slideo_approval", { p_post: id });
 }
 export async function approvePost(
   id: string,
@@ -263,17 +408,14 @@ export async function approvePost(
             `Slide ${index + 1}: record usage rights for its images in Assets before approval.`,
           );
     }
-    await query(
-      "INSERT INTO approvals VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(user_id,post_id) DO UPDATE SET revision=excluded.revision,hash=excluded.hash,render_hashes=excluded.render_hashes,created_at=excluded.created_at",
-      [
-        userId(),
-        id,
-        revision,
-        digest(JSON.stringify(contentOf(post))),
-        JSON.stringify(hashes),
-        now(),
-      ],
-    );
+    await write({
+      op: "approve",
+      post: id,
+      revision,
+      hash: digest(JSON.stringify(contentOf(post))),
+      render_hashes: JSON.stringify(hashes),
+      at: now(),
+    });
     post.status = "approved";
     await put("post", post);
     await audit("export.approved", id);
@@ -281,14 +423,7 @@ export async function approvePost(
   });
 }
 export async function assertApproval(post: Post) {
-  const [a] = await query<{
-    revision: number;
-    hash: string;
-    render_hashes: string;
-  }>(
-    "SELECT revision,hash,render_hashes FROM approvals WHERE user_id=$1 AND post_id=$2",
-    [userId(), post.id],
-  );
+  const a = await approval(post.id);
   if (
     !a ||
     !["approved", "published"].includes(post.status) ||
@@ -313,10 +448,7 @@ export async function archivePost(id: string) {
     if (post.status === "archived") return post;
     post.status = "archived";
     await put("post", post);
-    await query("DELETE FROM approvals WHERE user_id=$1 AND post_id=$2", [
-      userId(),
-      id,
-    ]);
+    await write({ op: "unapprove", post: id });
     await audit("post.archived", id);
     return post;
   });
@@ -334,21 +466,16 @@ export async function restorePost(id: string) {
 }
 // Revisions are immutable, so an image used by any revision must keep its file.
 export async function assetInUse(id: string) {
-  return (
-    (
-      await query(
-        "SELECT 1 FROM revisions WHERE user_id=$1 AND strpos(json,$2) > 0 LIMIT 1",
-        [userId(), JSON.stringify(id)],
-      )
-    ).length > 0
-  );
+  const quoted = JSON.stringify(id);
+  for (const json of current().tx?.revisions.values() ?? [])
+    if (json.includes(quoted)) return true;
+  return call<boolean>("slideo_asset_in_use", { p_asset: id });
 }
 export async function dailyUsage() {
-  const [row] = await query<{ n: number | string }>(
-    "SELECT COUNT(*) AS n FROM ai_attempts WHERE user_id=$1 AND at>=$2",
-    [userId(), now().slice(0, 10)],
-  );
-  return Number(row?.n ?? 0);
+  const used = await call<number>("slideo_ai_usage", {
+    p_since: now().slice(0, 10),
+  });
+  return Number(used) + (current().tx?.aiAttempts ?? 0);
 }
 // AI calls are counted per account, per UTC day.
 export function dailyLimit() {
@@ -356,31 +483,23 @@ export function dailyLimit() {
   return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
 }
 export async function recordAiAttempt(id: string) {
-  await query("INSERT INTO ai_attempts VALUES($1,$2,$3,$4,NULL)", [
-    id,
-    userId(),
-    now(),
-    "reserved",
-  ]);
+  await write({ op: "ai", id, at: now(), status: "reserved" });
 }
 export async function updateAiAttempt(
   id: string,
   status: string,
   usage: string,
 ) {
-  await query(
-    "UPDATE ai_attempts SET status=$1,usage=$2 WHERE id=$3 AND user_id=$4",
-    [status, usage, id, userId()],
-  );
+  await write({ op: "ai_update", id, status, usage });
 }
 export async function state(): Promise<StudioState> {
-  const [brands, formats, posts, assets, usedToday] = await Promise.all([
-    list<Brand>("brand"),
-    list<Format>("format"),
-    list<Post>("post"),
-    list<Asset>("asset"),
-    dailyUsage(),
-  ]);
+  const { brands, formats, posts, assets, usedToday } = await call<{
+    brands: Brand[];
+    formats: Format[];
+    posts: Post[];
+    assets: Asset[];
+    usedToday: number;
+  }>("slideo_state", { p_since: now().slice(0, 10) });
   return {
     brands,
     formats,
@@ -390,7 +509,7 @@ export async function state(): Promise<StudioState> {
       aiReady: !!process.env.OPENAI_API_KEY,
       model: process.env.OPENAI_MODEL || "gpt-5.6-luna",
       dailyLimit: dailyLimit(),
-      usedToday,
+      usedToday: Number(usedToday),
       hosted: hosted(),
       email: account().email,
     },
@@ -409,7 +528,8 @@ export async function migrateFormatSlideCounts() {
   return existingFormats;
 }
 // A new account gets the starter brand and format on its first request.
-// One writer seeds; concurrent first requests wait on the lock, then see it.
+// Concurrent first requests both try; one commits, the other retries, finds
+// the workspace seeded, and changes nothing.
 export async function ensureWorkspace() {
   const id = userId();
   if (seeded.has(id)) return;
