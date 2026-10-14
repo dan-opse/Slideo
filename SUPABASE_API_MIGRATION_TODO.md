@@ -5,7 +5,7 @@
 - Working branch: `worktree-vercel-supabase`
 - Existing PR: [#15](https://github.com/dan-opse/Slideo/pull/15)
 - Planning baseline: `14a5d8e563d714404ee06191c69a34c47b725b85`
-- Status: **Implemented and verified locally (2026-10-13)** in `e9c596a` and `f761fd0`, with this record in the following docs commit. Hosted persistence uses only Supabase's HTTPS APIs. Verified against a real local Supabase stack (Auth, Data API, Storage, Mailpit) and the production build; a Vercel preview against the user's `slideo-preview` project is still to do (see "Not yet verified").
+- Status: **Implemented and verified locally; core workflow also verified by the user on Vercel (updated 2026-10-14).** Implementation commits: `e9c596a` and `f761fd0`; reviewed code/documentation tip: `fb5cf24`. Hosted persistence uses only Supabase's HTTPS APIs. Password recovery and the remaining hosted checks are recorded under "Live verification and resume notes (2026-10-14)".
 
 ## Outcome in one paragraph
 
@@ -13,25 +13,25 @@ A hosted studio is configured with three Supabase values and no database URL, pa
 
 ## Final environment variables
 
-| Variable | Where | Required | Purpose |
-| --- | --- | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | public | hosted | Project URL; browsers sign in against it |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | public | hosted | Sign-in and session checks (legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` also accepted) |
-| `SUPABASE_SECRET_KEY` | **server-only** | hosted | Data API functions and private Storage (legacy `SUPABASE_SERVICE_ROLE_KEY` also accepted) |
-| `OPENAI_API_KEY`, `OPENAI_MODEL`, `AI_DAILY_CALL_LIMIT` | server | optional | AI writing, unchanged |
-| `STORAGE_BUCKET`, `STORAGE_EXPORT_BUCKET`, `EXPORT_LIMIT_MB` | server | optional | Bucket names and package limit, unchanged |
+| Variable                                                     | Where           | Required | Purpose                                                                                   |
+| ------------------------------------------------------------ | --------------- | -------- | ----------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`                                   | public          | hosted   | Project URL; browsers sign in against it                                                  |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`                       | public          | hosted   | Sign-in and session checks (legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` also accepted)         |
+| `SUPABASE_SECRET_KEY`                                        | **server-only** | hosted   | Data API functions and private Storage (legacy `SUPABASE_SERVICE_ROLE_KEY` also accepted) |
+| `OPENAI_API_KEY`, `OPENAI_MODEL`, `AI_DAILY_CALL_LIMIT`      | server          | optional | AI writing, unchanged                                                                     |
+| `STORAGE_BUCKET`, `STORAGE_EXPORT_BUCKET`, `EXPORT_LIMIT_MB` | server          | optional | Bucket names and package limit, unchanged                                                 |
 
 Removed: `DATABASE_URL`, `DATABASE_CA_CERT`, `DATABASE_POOL_SIZE`. Setting any one Supabase value without the others makes the studio answer 503 and log which are missing; it never falls back to local files.
 
 ## Instructions for this user's `slideo-preview` project
 
-1. **Re-enable the Data API** (Project Settings → Data API), with `public` exposed. Leave automatic exposure of new tables **off**; the setup SQL grants exactly what is needed.
+1. **Re-enable the Data API** (Integrations → Data API, or Project Settings → Data API), with `public` exposed. Leave automatic exposure of new tables **off**; the setup SQL grants exactly what is needed.
 2. Keep **Enforce SSL** on. The downloaded database certificate is not needed anywhere; don't add it to Vercel.
 3. SQL Editor → New query → paste `supabase/migrations/20261014013833_slideo_api.sql` → Run (safe to re-run).
 4. Authentication → URL Configuration: Site URL = the Vercel domain; redirect URLs include `https://<domain>/auth/confirm` and the preview domains' `/auth/confirm`.
-5. In Vercel, add the three variables above (mark the secret **Sensitive**), deploy a preview, and run `CHECK_ACCOUNTS="a@x:pw,b@x:pw" node --import tsx scripts/hosted-check.ts https://<preview-url>` with two confirmed test accounts.
+5. In Vercel, add the three variables above (store the server-only key as a **Secret**, called **Sensitive** in older layouts), deploy a preview, and run `CHECK_ACCOUNTS="a@x:pw,b@x:pw" node --import tsx scripts/hosted-check.ts https://<preview-url>` with two confirmed test accounts.
 
-The intended Vercel project and account still need confirming before any deployment; I deployed nothing and made no change to the remote Supabase project.
+The user has since configured the remote project and deployed a Vercel preview. See the 2026-10-14 live verification and remaining work below. The earlier implementation made no remote changes itself.
 
 ## Design decision that differs from the TODO's suggestion
 
@@ -121,7 +121,7 @@ Section 3 suggested one RPC per domain operation (save, approve, archive, …). 
 - [x] Import, large-ZIP and workspace-copy coverage preserved (`tests/import.test.ts`, `tests/exports.test.ts` and real Storage in `tests/hosted.test.ts`, `tests/workspace-copy.test.ts`).
 - [x] Rollback: a refused approval leaves no approval, status change or audit row; a commit the database refuses applies none of its changes and leaves the account version unchanged; history, published content and owners are protected in the database itself.
 - [x] Results recorded separately below for each adapter.
-- [ ] **Vercel preview:** not run (no confirmed Vercel project or account). Every listed flow was run against `next start` and the local stack instead; see "Not yet verified".
+- [ ] **Vercel preview:** the user verified signup/confirmation, image upload, draft creation, approval and ZIP export on 2026-10-14. Normal sign-in after sign-out, session refresh and two-account isolation still need live verification; see the session record below.
 
 ### 10. Finish the handoff with implementation evidence
 
@@ -131,31 +131,71 @@ Section 3 suggested one RPC per domain operation (save, approve, archive, …). 
 
 ## Verification record (2026-10-13)
 
-| Check | Adapter | Result |
-| --- | --- | --- |
-| `npm run typecheck`, `npm run lint`, Prettier check | — | pass |
-| `npm test` | embedded PGlite (same SQL functions in-process) | 95 tests: 90 pass, 5 skipped (the hosted end-to-end file needs the stack) |
-| `npm run test:supabase` | local Supabase stack, Data API over HTTP with the secret key; Auth and Storage for `tests/hosted.test.ts` | 95/95 pass |
-| `next build` with only the three Supabase values | — | pass; a canary secret value appears in neither `.next/static` nor `.next/server` |
-| `scripts/hosted-check.ts` against `next start` + local stack (`MAILPIT_URL`, `CHECK_REFRESH_WAIT=25`, JWT expiry 15 s) | hosted | all checks pass: sign-up form → email → `/auth/confirm` signs in; unconfirmed sign-in refused; cross-site form refused; signed-out redirect to `/login`; session refreshed after the access token expired; direct upload and >20 MB refusal; approval; signed ZIP download; second account isolated (state, media, approve, export); sign-out then 401 |
-| Real browser (Playwright, Chromium) against the same server | hosted | sign-up and confirmation link; upload through the UI PUTs from `localhost:3000` to Storage cross-origin with 200 and no console errors; hosted Settings copy correct |
-| Version check disabled in `slideo_commit` | PGlite | 4 race tests fail as expected; restored |
-| Migration applied twice | local stack | second run succeeds, data kept |
+| Check                                                                                                                  | Adapter                                                                                                   | Result                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `npm run typecheck`, `npm run lint`, Prettier check                                                                    | —                                                                                                         | pass                                                                                                                                                                                                                                                                                                                                                   |
+| `npm test`                                                                                                             | embedded PGlite (same SQL functions in-process)                                                           | 95 tests: 90 pass, 5 skipped (the hosted end-to-end file needs the stack)                                                                                                                                                                                                                                                                              |
+| `npm run test:supabase`                                                                                                | local Supabase stack, Data API over HTTP with the secret key; Auth and Storage for `tests/hosted.test.ts` | 95/95 pass                                                                                                                                                                                                                                                                                                                                             |
+| `next build` with only the three Supabase values                                                                       | —                                                                                                         | pass; a canary secret value appears in neither `.next/static` nor `.next/server`                                                                                                                                                                                                                                                                       |
+| `scripts/hosted-check.ts` against `next start` + local stack (`MAILPIT_URL`, `CHECK_REFRESH_WAIT=25`, JWT expiry 15 s) | hosted                                                                                                    | all checks pass: sign-up form → email → `/auth/confirm` signs in; unconfirmed sign-in refused; cross-site form refused; signed-out redirect to `/login`; session refreshed after the access token expired; direct upload and >20 MB refusal; approval; signed ZIP download; second account isolated (state, media, approve, export); sign-out then 401 |
+| Real browser (Playwright, Chromium) against the same server                                                            | hosted                                                                                                    | sign-up and confirmation link; upload through the UI PUTs from `localhost:3000` to Storage cross-origin with 200 and no console errors; hosted Settings copy correct                                                                                                                                                                                   |
+| Version check disabled in `slideo_commit`                                                                              | PGlite                                                                                                    | 4 race tests fail as expected; restored                                                                                                                                                                                                                                                                                                                |
+| Migration applied twice                                                                                                | local stack                                                                                               | second run succeeds, data kept                                                                                                                                                                                                                                                                                                                         |
 
 Local stack: Supabase CLI 2.119.0, Postgres 17, `supabase/config.toml` on ports 55420–55429 (project id `slideo`), automatic table exposure off, email confirmations on.
 
 Found and fixed along the way: Supabase Storage reports an oversized signed upload as HTTP 400 with `statusCode: "413"` in the body, so the browser showed "upload did not finish" instead of the size limit (`src/components/request.ts`); asset edits and image imports were not atomic and could resurrect a just-deleted image (now transactions).
 
+## Live verification and resume notes (2026-10-14)
+
+The user paused the setup session after reporting **"email rate limit exceeded"** and forgetting the new Slideo password. Keep the existing Supabase project, account and uploaded data. No password recovery feature has been implemented during this session.
+
+### Confirmed target and completed setup
+
+- Supabase project: `slideo-preview`. The user confirmed enabling the Data API, running the reviewed setup SQL, adding the three Supabase variables to Vercel Preview, and saving the Auth redirect URLs.
+- Vercel project: `slideo-preview`, id `prj_3Y8xJiqlrSKO1pNwjSgdrnlelwP7`, under `dan-opses-projects`.
+- Vercel's connection confirmed deployment `dpl_JCxKRT7KXmy8KhFyM2mSjyWF7VoJ` was **READY**, from `worktree-vercel-supabase` at reviewed commit `fb5cf24c00949abbc6c1ba62c7ebe9f3e3fb664d`.
+- Stable branch URL: `https://slideo-preview-git-worktree-vercel-supabase-dan-opses-projects.vercel.app`.
+- Reviewed deployment URL: `https://slideo-preview-dhl839nf5-dan-opses-projects.vercel.app`.
+- Site URL was set to the stable branch URL; allowed redirect entries are both addresses above with `/auth/confirm` appended.
+- The user initially deployed `master` during import, then created the correct branch preview. Do not assume the project's production-domain deployment contains the migration. PR #15 has not been merged in this session.
+
+### Verification evidence
+
+- Codex independently reran the embedded suite: **90 passed, 5 hosted-only tests skipped**. The first sandboxed run had one local-listener `EPERM`; the unrestricted rerun passed.
+- Codex independently reran `npm run test:supabase`: **95/95 passed** against local Supabase's real Auth, Data API and Storage, including the concurrency and direct-access tests.
+- Type checking, lint, formatting, local and hosted production builds passed. GitHub CI for the reviewed commit was green.
+- `scripts/hosted-check.ts` passed against the production `next start` server and local Supabase with only the three API settings, covering signup, email confirmation, uploads, approval, export, account isolation and sign-out. The temporary server and local stack were stopped afterward, preserving the stack's data volumes.
+- **User-reported live results:** signup and email confirmation opened the studio; an uploaded image appeared in Assets; a two-slide manual draft was created; the image was added; approval and ZIP download worked. The user opened the ZIP and reported photos plus the manifest, caption and README files. This exercises the actual Vercel/Supabase workflow; it is not an automated browser trace.
+- Automated access to the protected preview through the Vercel connection failed with **403** while reading protection-bypass access. Deployment metadata was readable, but live response bodies and authenticated account behavior were not independently inspected through that connection. Do not disable deployment protection to work around it.
+
+### Next Claude task: password recovery and usable Auth errors
+
+- [ ] Implement **Forgot password** and **Set a new password** screens for the existing Slideo account. The login page currently has only Sign in and Create account, and the auth handler has no password recovery/update action. Relevant files: `src/app/login/page.tsx`, `src/app/auth/[action]/route.ts`, `src/lib/supabase-server.ts` and `src/proxy.ts`. Read `AGENTS.md` and the relevant installed Next.js guides first.
+- [ ] Request recovery through Supabase Auth's `resetPasswordForEmail`, with the recovery destination included in Supabase's redirect allow list. Handle the verified recovery session/code, then update the password with `updateUser`. Preserve account ids and all workspace records/files.
+- [ ] Validate the new password and confirmation, handle expired/used/invalid recovery links, and give a clear success path back to sign-in. Requesting recovery must not disclose whether an email has an account.
+- [ ] Surface actionable messages for known email rate limits, unconfirmed email and recovery failures. The existing sign-in handler maps every Supabase error to "That email and password don't match an account", which cannot distinguish setup/service failures from invalid credentials.
+- [ ] Verify the full reset flow with local Mailpit and a production server: request email, follow the link, set a new password, sign out, sign in with the new password, and confirm the existing image/slideshow remain. Check invalid and expired links and rate-limit responses as well.
+- [ ] Explain the hosted mailer limitation in setup instructions. Without custom SMTP, Supabase's default sender delivers only to organization-team email addresses and currently allows **2 messages per hour**. The user encountered a limit; retry after the sending allowance recovers. Configure custom SMTP before supporting arbitrary user email addresses. Do not weaken confirmation requirements as a workaround.
+
+### Remaining live checks
+
+- [ ] Recover the existing account, then verify ordinary email/password sign-in after sign-out and persistence of the uploaded image/slideshow. The user explicitly forgot the password; this does not establish an incorrect-password-validation defect.
+- [ ] Verify session refresh after expiry against the hosted project.
+- [ ] Verify a second confirmed test account cannot see or access the first account's state, media, approvals or exports. The default mailer's team-address restriction must be handled when preparing the second account; do not assume an arbitrary email can receive confirmation.
+- [ ] Verify larger packages and Vercel execution limits on the real preview. The user tested a two-slide ZIP; packages over 20 MiB were verified on local Supabase, not the cloud deployment.
+- [ ] If automated live testing is needed, restore the Vercel connection's access to this project's team and protected deployment. Do not publish credentials in the repo or chat.
+
 ## Not yet verified
 
-- A Vercel preview against `slideo-preview`: real email delivery through Supabase's mailer (rate-limited without custom SMTP), CORS from the real Vercel domain, Vercel function limits, and the hosted Data API with exposure settings as configured in the dashboard. Run step 5 of the user instructions.
+- Complete hosted sign-in recovery, session refresh, second-account isolation and larger-package checks, as listed above. The main signup/upload/approval/export workflow has user-reported live evidence.
 - After a sign-out, an access token copied out of the browser stays valid until it expires (Supabase JWTs are stateless; 1 hour by default). The studio's cookies are cleared, and this matches Supabase's standard behavior.
 
 ## Completion gate
 
 The migration is complete when a fresh hosted project can run the full manual studio workflow over Supabase HTTPS APIs without a Postgres URL/password/CA configured in Vercel, account isolation and immutable approval rules hold even for direct API callers, and all previously verified fixes remain covered. Document any server-only API key required by the chosen trust model. An API-shaped wrapper that still connects to Postgres from the app does not satisfy this request.
 
-**Status against the gate:** met on a fresh local Supabase stack with production `next start`; the server-only secret key is documented above. The Vercel preview run is the remaining confirmation.
+**Status against the gate:** met on a fresh local Supabase stack with production `next start`; the server-only secret key is documented above. The user also verified the core workflow on a real Vercel preview. Password recovery is an outstanding feature gap, and the remaining hosted checks are listed in the 2026-10-14 session record.
 
 This handoff authorizes implementation planning and code changes; it does not authorize merging, production deployment, or destructive changes to existing user data. Prepare any schema/deployment change against the confirmed target before release.
 
@@ -167,4 +207,6 @@ This handoff authorizes implementation planning and code changes; it does not au
 - [Explicit table exposure changes](https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically)
 - [Supabase API keys](https://supabase.com/docs/guides/api/api-keys)
 - [Supabase Auth redirect URLs](https://supabase.com/docs/guides/auth/redirect-urls)
+- [Supabase password recovery](https://supabase.com/docs/guides/auth/passwords#resetting-a-password)
+- [Supabase default email limits and custom SMTP](https://supabase.com/docs/guides/auth/auth-smtp)
 - [Vercel environment variables](https://vercel.com/docs/environment-variables)
