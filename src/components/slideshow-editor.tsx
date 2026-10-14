@@ -348,12 +348,12 @@ export default function SlideshowEditor({
     setEditing(false);
   }
   async function download() {
-    const url = URL.createObjectURL(await exportPackage(saved));
+    const { url, local } = await exportPackage(saved);
     const link = document.createElement("a");
     link.href = url;
     link.download = `${saved.title.replace(/[^a-z0-9]+/gi, "-").slice(0, 70)}.zip`;
     link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    if (local) setTimeout(() => URL.revokeObjectURL(url), 1000);
     onToast("Images and caption downloaded.");
   }
   function restore(next: Post) {

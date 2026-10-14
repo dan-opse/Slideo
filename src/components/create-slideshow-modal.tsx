@@ -152,7 +152,7 @@ export function CreateSlideshowModal({
           <section className="idea-panel" aria-label="Website idea generator">
             <Field
               label="Website URL"
-              hint="Public HTTPS pages only. The page is read on this computer and is not saved."
+              hint="Public HTTPS pages only. The studio reads the page to suggest ideas and doesn’t save it."
             >
               <input
                 type="url"

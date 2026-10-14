@@ -14,6 +14,7 @@ import {
   ChevronRight,
   ImagePlus,
   Loader2,
+  LogOut,
   Plus,
   Settings2,
   ShieldCheck,
@@ -23,7 +24,7 @@ import {
 import type { Asset, Brand, Format, Post, StudioState } from "@/lib/schema";
 import { blankFormat, defaultBrandId, libraryAssets } from "@/lib/defaults";
 import { loadStudio, studioAction } from "./request";
-import { IconButton, SlideoMark } from "./studio-ui";
+import { IconButton, SlideoMark, workspaceLabels } from "./studio-ui";
 import {
   BrandGrid,
   FormatGrid,
@@ -112,6 +113,7 @@ export default function Studio() {
         {error ? <p role="alert">{error}</p> : <Loader2 className="spin" />}
       </main>
     );
+  const labels = workspaceLabels(state.settings.hosted);
   const visible = state.posts.filter((p) => p.status !== "archived");
   const deleted = state.posts.filter((p) => p.status === "archived");
   const review = visible.filter((p) => p.status === "needs_review");
@@ -153,9 +155,9 @@ export default function Studio() {
           <span className="workspace-avatar">D</span>
           <div>
             <strong>Personal studio</strong>
-            <small>Local workspace</small>
+            <small>{labels.workspace}</small>
           </div>
-          <span className="local-dot" title="Local workspace" />
+          <span className="local-dot" title={labels.workspace} />
         </div>
         <p className="nav-label">WORKSPACE</p>
         <nav>
@@ -190,15 +192,39 @@ export default function Studio() {
             <Settings2 size={18} />
             Settings
           </button>
-          <div className="profile">
-            <span className="profile-avatar">D</span>
-            <div>
-              <strong>Daniel’s workspace</strong>
-              <small>
-                <i /> Local & private
-              </small>
+          {state.settings.hosted ? (
+            <div className="profile">
+              <span className="profile-avatar">
+                {(state.settings.email || "?").charAt(0).toUpperCase()}
+              </span>
+              <div>
+                <strong>{state.settings.email || "Your workspace"}</strong>
+                <small>
+                  <i /> Private to your account
+                </small>
+              </div>
+              <form method="post" action="/auth/signout">
+                <button
+                  className="icon-button profile-signout"
+                  type="submit"
+                  aria-label="Sign out"
+                  title="Sign out"
+                >
+                  <LogOut size={16} />
+                </button>
+              </form>
             </div>
-          </div>
+          ) : (
+            <div className="profile">
+              <span className="profile-avatar">D</span>
+              <div>
+                <strong>Daniel’s workspace</strong>
+                <small>
+                  <i /> Local & private
+                </small>
+              </div>
+            </div>
+          )}
         </div>
       </aside>
       <div className="main-shell">
@@ -209,7 +235,7 @@ export default function Studio() {
             <strong>{view}</strong>
           </div>
           <span className="topbar-note">
-            <span className="local-dot" /> All work stays on this computer
+            <span className="local-dot" /> {labels.note}
           </span>
           <button
             className="small-avatar"

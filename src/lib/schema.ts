@@ -206,6 +206,8 @@ export type StudioState = {
     model: string;
     dailyLimit: number;
     usedToday: number;
-    localOnly: true;
+    // Hosted studios have signed-in accounts; local ones have a single user.
+    hosted: boolean;
+    email: string | null;
   };
 };

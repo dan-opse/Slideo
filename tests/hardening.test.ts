@@ -8,10 +8,12 @@ import path from "node:path";
 import sharp from "sharp";
 import type { Asset, Brand, Format, Post } from "../src/lib/schema";
 import { seedSamplePost } from "./sample-post";
+import { closeTestDatabase, prepareTestDatabase } from "./database";
 const folder = mkdtempSync(path.join(tmpdir(), "slideo-hardening-test-"));
 process.env.STUDIO_DATA_DIR = folder;
 delete process.env.OPENAI_API_KEY;
 const store = await import("../src/lib/store");
+await prepareTestDatabase();
 const { POST } = await import("../src/app/api/studio/route");
 const { GET: renderRoute } =
   await import("../src/app/api/render/[post]/[revision]/[slide]/route");
@@ -21,9 +23,10 @@ const { photoSlide } = await import("../src/lib/photo-layout");
 const { describeIssues } = await import("../src/lib/errors");
 const { formatSchema } = await import("../src/lib/schema");
 const { NextRequest } = await import("next/server");
-const sample = seedSamplePost(store);
-after(() => {
-  store.database().close();
+const sample = await seedSamplePost(store);
+after(async () => {
+  await store.closeStore();
+  await closeTestDatabase();
   rmSync(folder, { recursive: true, force: true });
 });
 
@@ -121,7 +124,7 @@ test("uploads require rights, reject unreadable files and bombs, and de-duplicat
 });
 
 test("validation messages are human readable and ids must exist", async () => {
-  const base = store.get<Format>("format", "tiktok-photo");
+  const base = await store.get<Format>("format", "tiktok-photo");
   const tooFew = formatSchema.safeParse({ ...base, slideCount: 1 });
   assert.equal(tooFew.success, false);
   assert.equal(
@@ -130,7 +133,10 @@ test("validation messages are human readable and ids must exist", async () => {
   );
   const tone = await action({
     action: "brand",
-    data: { ...store.get<Brand>("brand", "demo-brand"), tone: "x".repeat(301) },
+    data: {
+      ...(await store.get<Brand>("brand", "demo-brand")),
+      tone: "x".repeat(301),
+    },
   });
   assert.equal(
     tone.body.error,
@@ -219,7 +225,7 @@ test("published posts cannot be archived; deleted posts can be restored", async 
   const p = await approve(await photoPost("Pub"));
   const archived = await action({ action: "archive", id: p.id });
   assert.equal(archived.body.status, "archived");
-  assert.throws(() => store.assertApproval(archived.body));
+  await assert.rejects(() => store.assertApproval(archived.body));
   const restored = await action({ action: "restore", id: p.id });
   assert.equal(restored.body.status, "needs_review");
   const again = await approve(restored.body);
@@ -274,7 +280,7 @@ test("results keep earlier snapshots without breaking the approved export", asyn
       id: p.id,
       data: { views, likes: null, comments: null, shares: null },
     });
-  const latest = store.get<Post>("post", p.id);
+  const latest = await store.get<Post>("post", p.id);
   assert.equal(latest.metrics?.views, 30);
   assert.deepEqual(
     latest.metricsHistory?.map((m) => m.views),
@@ -340,11 +346,17 @@ test("assets can be edited; removal keeps files that revisions use", async () =>
   assert.equal(edited.body.rights, "Licensed from a friend");
   const kept = await action({ action: "removeAsset", id: used.id });
   assert.equal(kept.body.kept, true);
-  assert.ok(store.get<Asset>("asset", used.id).removedAt);
-  assert.ok(existsSync(path.join(folder, "assets", `${used.id}.jpg`)));
+  assert.ok((await store.get<Asset>("asset", used.id)).removedAt);
+  assert.ok(
+    existsSync(path.join(folder, "files", "local", "assets", `${used.id}.jpg`)),
+  );
   const gone = await action({ action: "removeAsset", id: spare.id });
   assert.equal(gone.body.kept, false);
-  assert.ok(!existsSync(path.join(folder, "assets", `${spare.id}.jpg`)));
+  assert.ok(
+    !existsSync(
+      path.join(folder, "files", "local", "assets", `${spare.id}.jpg`),
+    ),
+  );
   const fresh = await photoPost("Keep");
   assert.equal(fresh.slides[0].assetId, null, "removed images are not reused");
 });
@@ -370,9 +382,15 @@ test("bulk asset removal deletes unused images and keeps used ones", async () =>
     result.body.kept.map((a: Asset) => a.id),
     [used.id],
   );
-  assert.ok(store.get<Asset>("asset", used.id).removedAt);
-  assert.ok(existsSync(path.join(folder, "assets", `${used.id}.jpg`)));
-  assert.ok(!existsSync(path.join(folder, "assets", `${spare.id}.jpg`)));
+  assert.ok((await store.get<Asset>("asset", used.id)).removedAt);
+  assert.ok(
+    existsSync(path.join(folder, "files", "local", "assets", `${used.id}.jpg`)),
+  );
+  assert.ok(
+    !existsSync(
+      path.join(folder, "files", "local", "assets", `${spare.id}.jpg`),
+    ),
+  );
   const empty = await action({ action: "removeAssets", ids: [] });
   assert.equal(empty.status, 400);
 });
@@ -396,7 +414,7 @@ test("render errors use accurate status codes and never expose server paths", as
       },
     );
   assert.equal((await call("9")).status, 404);
-  rmSync(path.join(folder, "assets", `${asset.id}.jpg`));
+  rmSync(path.join(folder, "files", "local", "assets", `${asset.id}.jpg`));
   const missing = await call("0");
   const text = await missing.text();
   assert.equal(missing.status, 422);
@@ -447,7 +465,10 @@ test("cropped photo slots keep the visible part of the image", async () => {
     ])
     .jpeg()
     .toBuffer();
-  writeFileSync(path.join(folder, "assets", "half.jpg"), half);
+  writeFileSync(
+    path.join(folder, "files", "local", "assets", "half.jpg"),
+    half,
+  );
   const font = await photoFont();
   const base = sample.slides[0];
   for (const [imageX, channel] of [
@@ -469,13 +490,17 @@ test("cropped photo slots keep the visible part of the image", async () => {
   }
 });
 
-test("module import does not create a workspace and concurrent first boots seed once", async () => {
+test("module import does not create a workspace and concurrent first requests seed once", async () => {
   const run = (dir: string, code: string) =>
     new Promise<string>((resolve, reject) => {
       const child = spawn(
         process.execPath,
         ["--import", "tsx", "--input-type=module", "-e", code],
-        { env: { ...process.env, STUDIO_DATA_DIR: dir }, cwd: process.cwd() },
+        // Each child gets a fresh embedded database in its own folder.
+        {
+          env: { ...process.env, STUDIO_DATA_DIR: dir, DATABASE_URL: "" },
+          cwd: process.cwd(),
+        },
       );
       let out = "",
         err = "";
@@ -491,13 +516,11 @@ test("module import does not create a workspace and concurrent first boots seed 
   const lazy = path.join(folder, "never-created");
   await run(lazy, 'await import("./src/lib/store.ts");');
   assert.equal(existsSync(lazy), false);
+  // Requests for one account race to seed it; the account lock lets one win.
   const shared = path.join(folder, "concurrent");
-  const boot =
-    'const s = await import("./src/lib/store.ts"); s.list("post"); s.database().close();';
-  await Promise.all(Array.from({ length: 6 }, () => run(shared, boot)));
   const count = await run(
     shared,
-    'const s = await import("./src/lib/store.ts"); console.log(s.list("format").map((f) => f.id).join(), s.database().prepare("SELECT COUNT(*) AS n FROM audit WHERE action=?").get("format.tiktok_photo_added").n);',
+    'const s = await import("./src/lib/store.ts"); const d = await import("./src/lib/db.ts"); await Promise.all(Array.from({ length: 6 }, () => s.list("post"))); const [row] = await (await d.driver()).query("SELECT COUNT(*)::int AS n FROM audit WHERE action=$1", ["format.tiktok_photo_added"]); console.log((await s.list("format")).map((f) => f.id).join(), row.n); await s.closeStore();',
   );
   assert.equal(count.trim(), "tiktok-photo 1");
 });

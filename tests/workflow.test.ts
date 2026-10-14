@@ -5,11 +5,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { seedSamplePost } from "./sample-post";
+import { closeTestDatabase, sql, prepareTestDatabase } from "./database";
 const folder = mkdtempSync(path.join(tmpdir(), "slideo-test-"));
 process.env.STUDIO_DATA_DIR = folder;
 const store = await import("../src/lib/store");
+await prepareTestDatabase();
 const { renderAll, renderSlide } = await import("../src/lib/render");
-const { guard } = await import("../src/lib/guard");
+const { authorize } = await import("../src/lib/auth");
 const { NextRequest } = await import("next/server");
 const { GET: exportPackage } = await import("../src/app/api/export/[id]/route");
 const { POST: studioPost } = await import("../src/app/api/studio/route");
@@ -17,13 +19,14 @@ const { formatSchema, postSchema } = await import("../src/lib/schema");
 const { assertExactSlideCount, ideasSchema } = await import("../src/lib/ai");
 const { assertPublicWebsiteUrl, readWebsite } =
   await import("../src/lib/website");
-const original = seedSamplePost(store);
-after(() => {
-  store.database().close();
+const original = await seedSamplePost(store);
+after(async () => {
+  await store.closeStore();
+  await closeTestDatabase();
   rmSync(folder, { recursive: true, force: true });
 });
-test("fresh workspaces start with a blank brand brief", () => {
-  const brand = store.get<import("../src/lib/schema").Brand>(
+test("fresh workspaces start with a blank brand brief", async () => {
+  const brand = await store.get<import("../src/lib/schema").Brand>(
     "brand",
     "demo-brand",
   );
@@ -32,8 +35,9 @@ test("fresh workspaces start with a blank brand brief", () => {
   assert.equal(brand.facts, "");
   assert.equal(brand.destination, "");
 });
-test("new formats are capped at 10 while legacy posts can retain more slides", () => {
-  const format = store.list<import("../src/lib/schema").Format>("format")[0];
+test("new formats are capped at 10 while legacy posts can retain more slides", async () => {
+  const [format] =
+    await store.list<import("../src/lib/schema").Format>("format");
   assert.throws(() => formatSchema.parse({ ...format, slideCount: 11 }));
   assert.doesNotThrow(() =>
     postSchema.parse({
@@ -45,24 +49,25 @@ test("new formats are capped at 10 while legacy posts can retain more slides", (
     }),
   );
 });
-test("legacy format defaults above 10 migrate and record an audit event", () => {
-  const format = store.list<import("../src/lib/schema").Format>("format")[0];
-  store.put("format", { ...format, slideCount: 14 });
-  store.migrateFormatSlideCounts();
+test("legacy format defaults above 10 migrate and record an audit event", async () => {
+  const [format] =
+    await store.list<import("../src/lib/schema").Format>("format");
+  await store.put("format", { ...format, slideCount: 14 });
+  await store.migrateFormatSlideCounts();
   assert.equal(
-    store.get<import("../src/lib/schema").Format>("format", format.id)
+    (await store.get<import("../src/lib/schema").Format>("format", format.id))
       .slideCount,
     10,
   );
-  const audit = store
-    .database()
-    .prepare("SELECT COUNT(*) AS count FROM audit WHERE action=? AND entity=?")
-    .get("format.slide_count_capped", format.id) as { count: number };
+  const [audit] = await sql<{ count: number }>(
+    "SELECT COUNT(*)::int AS count FROM audit WHERE action=$1 AND entity=$2",
+    ["format.slide_count_capped", format.id],
+  );
   assert.equal(audit.count, 1);
-  store.put("format", format);
+  await store.put("format", format);
 });
 test("manual create uses the modal count and preserves a legacy fallback", async () => {
-  const format = store.get<import("../src/lib/schema").Format>(
+  const format = await store.get<import("../src/lib/schema").Format>(
     "format",
     "tiktok-photo",
   );
@@ -213,11 +218,11 @@ test("website reader validates redirect targets, content types, and size", async
   );
 });
 test("unapproved export is denied and exact renders authorize it", async () => {
-  const post = store.savePost({
+  const post = await store.savePost({
     ...store.contentOf(original),
     title: "Approval test",
   });
-  assert.throws(
+  await assert.rejects(
     () => store.assertApproval(post),
     /Approve this exact revision/,
   );
@@ -227,36 +232,39 @@ test("unapproved export is denied and exact renders authorize it", async () => {
   assert.equal(meta.width, 1080);
   assert.equal(meta.height, 1350);
   assert.equal(meta.format, "jpeg");
-  const approved = store.approvePost(post.id, post.revision, hashes);
-  assert.deepEqual(store.assertApproval(approved), hashes);
+  const approved = await store.approvePost(post.id, post.revision, hashes);
+  assert.deepEqual(await store.assertApproval(approved), hashes);
   assert.deepEqual(await renderSlide(post.id, post.revision, 0), buffers[0]);
-  const revised = store.savePost(
+  const revised = await store.savePost(
     { ...store.contentOf(approved), caption: "Changed after approval" },
     post.id,
     post.revision,
   );
   assert.equal(revised.status, "needs_review");
-  assert.throws(() => store.assertApproval(revised));
-  assert.equal(store.revisionContent(post.id, 1).caption, original.caption);
-  assert.throws(() => store.approvePost(post.id, 1, hashes), /changed/);
+  await assert.rejects(() => store.assertApproval(revised));
+  assert.equal(
+    (await store.revisionContent(post.id, 1)).caption,
+    original.caption,
+  );
+  await assert.rejects(() => store.approvePost(post.id, 1, hashes), /changed/);
 });
-test("stale edits cannot overwrite a saved revision", () => {
-  const p = store.savePost({
+test("stale edits cannot overwrite a saved revision", async () => {
+  const p = await store.savePost({
     ...store.contentOf(original),
     title: "Concurrency",
   });
-  store.savePost({ ...store.contentOf(p), title: "First edit" }, p.id, 1);
-  assert.throws(
+  await store.savePost({ ...store.contentOf(p), title: "First edit" }, p.id, 1);
+  await assert.rejects(
     () =>
       store.savePost({ ...store.contentOf(p), title: "Stale edit" }, p.id, 1),
     /another window/,
   );
   assert.equal(
-    store.get<import("../src/lib/schema").Post>("post", p.id).title,
+    (await store.get<import("../src/lib/schema").Post>("post", p.id)).title,
     "First edit",
   );
 });
-test("unknown asset rights block approval", () => {
+test("unknown asset rights block approval", async () => {
   const asset = {
     id: store.uid(),
     name: "Unlicensed",
@@ -267,15 +275,18 @@ test("unknown asset rights block approval", () => {
     hash: "x",
     createdAt: store.now(),
   };
-  store.put("asset", asset);
-  const p = store.savePost({
+  await store.put("asset", asset);
+  const p = await store.savePost({
     ...store.contentOf(original),
     slides: [{ ...original.slides[0], assetId: asset.id }],
   });
-  assert.throws(() => store.approvePost(p.id, 1, ["fake"]), /usage rights/);
+  await assert.rejects(
+    () => store.approvePost(p.id, 1, ["fake"]),
+    /usage rights/,
+  );
 });
 test("text overflow fails explicitly instead of clipping", async () => {
-  const p = store.savePost({
+  const p = await store.savePost({
     ...store.contentOf(original),
     slides: [
       {
@@ -288,7 +299,7 @@ test("text overflow fails explicitly instead of clipping", async () => {
   await assert.rejects(renderAll(p.id, 1), /too tall/);
 });
 test("story canvas renders at the documented size and escapes markup", async () => {
-  const p = store.savePost({
+  const p = await store.savePost({
     ...store.contentOf(original),
     aspect: "story",
     slides: [
@@ -306,34 +317,25 @@ test("story canvas renders at the documented size and escapes markup", async () 
   assert.equal(meta.width, 1080);
   assert.equal(meta.height, 1920);
 });
-test("local access guard rejects foreign hosts and origins", () => {
+test("local access guard rejects foreign hosts and origins", async () => {
+  const outcome = async (headers: Record<string, string>) => {
+    const result = await authorize(
+      new NextRequest("http://localhost:3000/api/studio", { headers }),
+    );
+    return result instanceof Response ? result.status : result.id;
+  };
   assert.equal(
-    guard(
-      new NextRequest("http://localhost:3000/api/studio", {
-        headers: { host: "localhost:3000", origin: "http://localhost:3000" },
-      }),
-    ),
-    null,
+    await outcome({ host: "localhost:3000", origin: "http://localhost:3000" }),
+    "local",
   );
+  assert.equal(await outcome({ host: "evil.example" }), 403);
   assert.equal(
-    guard(
-      new NextRequest("http://localhost:3000/api/studio", {
-        headers: { host: "evil.example" },
-      }),
-    )?.status,
-    403,
-  );
-  assert.equal(
-    guard(
-      new NextRequest("http://localhost:3000/api/studio", {
-        headers: { host: "localhost:3000", origin: "https://evil.example" },
-      }),
-    )?.status,
+    await outcome({ host: "localhost:3000", origin: "https://evil.example" }),
     403,
   );
 });
 test("export route returns a ZIP only for the approved revision", async () => {
-  const post = store.savePost({
+  const post = await store.savePost({
     ...store.contentOf(original),
     title: "Route export test",
   });
@@ -346,7 +348,7 @@ test("export route returns a ZIP only for the approved revision", async () => {
   });
   assert.equal(denied.status, 403);
   const { hashes } = await renderAll(post.id, post.revision);
-  store.approvePost(post.id, post.revision, hashes);
+  await store.approvePost(post.id, post.revision, hashes);
   const response = await exportPackage(request, {
     params: Promise.resolve({ id: post.id }),
   });

@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 const config: NextConfig = {
-  serverExternalPackages: ["sharp"],
+  // PGlite ships WebAssembly and data files that must load from node_modules.
+  serverExternalPackages: ["sharp", "@electric-sql/pglite"],
+  // The server renders slides with the bundled TikTok fonts, which it reads
+  // from public/; serverless functions only contain files listed here.
+  outputFileTracingIncludes: {
+    "/api/**/*": ["./public/fonts/**/*"],
+  },
   devIndicators: false,
   poweredByHeader: false,
   headers() {

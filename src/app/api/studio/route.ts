@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import sharp from "sharp";
-import { mkdir, unlink, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { guard } from "@/lib/guard";
+import { authorize } from "@/lib/auth";
+import { readLimited } from "@/lib/body";
+import { files, UPLOAD_BYTES } from "@/lib/files";
 import {
   assetUpdateSchema,
   brandSchema,
@@ -22,8 +22,8 @@ import {
   assetInUse,
   audit,
   contentOf,
-  dataDir,
   digest,
+  fileKey,
   get,
   list,
   nextVersion,
@@ -36,6 +36,7 @@ import {
   StudioError,
   transaction,
   uid,
+  withAccount,
 } from "@/lib/store";
 import { renderAll } from "@/lib/render";
 import {
@@ -46,18 +47,16 @@ import {
 } from "@/lib/ai";
 import { readWebsite } from "@/lib/website";
 import { photoFont } from "@/lib/photo-render";
-import {
-  slideAssetIds,
-  slideStructure,
-  templateSlide,
-} from "@/lib/format-template";
+import { slideStructure, templateSlide } from "@/lib/format-template";
 import { describeIssues } from "@/lib/errors";
 import { logUnexpected } from "@/lib/log";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// AI drafts wait up to 90 seconds for OpenAI, then render every slide.
+export const maxDuration = 300;
 
 const JSON_LIMIT = 250_000;
-const UPLOAD_LIMIT = 22 * 1024 * 1024;
+const UPLOAD_LIMIT = UPLOAD_BYTES + 2 * 1024 * 1024;
 const MAX_PIXELS = 40_000_000;
 const MAX_METRIC_SNAPSHOTS = 200;
 const TIKTOK_POST_URL = /^https:\/\/((www|m|vm|vt)\.)?tiktok\.com\//i;
@@ -67,6 +66,8 @@ const ACTIONS = new Set([
   "asset",
   "removeAsset",
   "removeAssets",
+  "uploadUrl",
+  "importUpload",
   "hooks",
   "ideas",
   "save",
@@ -80,33 +81,6 @@ const ACTIONS = new Set([
   "metrics",
 ]);
 
-// Counts the bytes actually received, so a chunked request without a
-// Content-Length header cannot exceed the limit either.
-async function readLimited(req: NextRequest, limit: number, message: string) {
-  if (Number(req.headers.get("content-length") || 0) > limit)
-    throw new StudioError(message, 413);
-  if (!req.body) return new Uint8Array();
-  const reader = req.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > limit) {
-      await reader.cancel();
-      throw new StudioError(message, 413);
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
-}
 async function readJson(req: NextRequest) {
   const text = new TextDecoder().decode(
     await readLimited(req, JSON_LIMIT, "Request too large."),
@@ -124,30 +98,32 @@ async function readJson(req: NextRequest) {
 const unreadable = () =>
   new StudioError("This file is not a readable JPEG, PNG, or WebP image.");
 
-async function upload(req: NextRequest) {
-  const bytes = await readLimited(req, UPLOAD_LIMIT, "Upload limit is 20 MB.");
-  const form = await new Response(bytes, {
-    headers: { "content-type": req.headers.get("content-type") || "" },
-  })
-    .formData()
-    .catch(() => {
-      throw new StudioError("The upload could not be read. Try again.");
-    });
-  const file = form.get("file");
-  if (!(file instanceof File) || file.size > 20 * 1024 * 1024)
+const uploadFields = z.object({
+  name: z
+    .string()
+    .default("image")
+    .transform((s) => s.slice(0, 150)),
+  rights: z
+    .string()
+    .default("")
+    .transform((s) => s.trim().slice(0, 1000)),
+  collection: z
+    .string()
+    .default("")
+    .transform((s) => s.trim().slice(0, 80) || "My collection"),
+});
+
+// Normalizes an uploaded image and adds it to the library.
+async function importImage(
+  input: Buffer,
+  fields: z.infer<typeof uploadFields>,
+) {
+  if (input.byteLength > UPLOAD_BYTES)
     throw new StudioError("Choose a JPEG, PNG, or WebP under 20 MB.");
-  const rights = String(form.get("rights") || "")
-    .trim()
-    .slice(0, 1000);
-  if (!rights)
+  if (!fields.rights)
     throw new StudioError(
       "Record usage rights for these images, for example “Original photos taken by me”.",
     );
-  const collection =
-    String(form.get("collection") || "")
-      .trim()
-      .slice(0, 80) || "My collection";
-  const input = Buffer.from(await file.arrayBuffer());
   const meta = await sharp(input, { limitInputPixels: false })
     .metadata()
     .catch(() => {
@@ -179,393 +155,123 @@ async function upload(req: NextRequest) {
       throw unreadable();
     });
   const hash = digest(data);
-  const existing = list<Asset>("asset").find(
-    (asset) =>
-      asset.hash === hash &&
-      asset.collection === collection &&
-      !asset.removedAt,
-  );
+  const same = (asset: Asset) =>
+    asset.hash === hash &&
+    asset.collection === fields.collection &&
+    !asset.removedAt;
+  const existing = (await list<Asset>("asset")).find(same);
   if (existing) return { asset: existing, duplicate: true };
   const asset: Asset = {
     id: uid(),
-    name: file.name.slice(0, 150),
-    collection,
-    rights,
+    name: fields.name,
+    collection: fields.collection,
+    rights: fields.rights,
     width: info.width,
     height: info.height,
     hash,
     createdAt: now(),
   };
-  await mkdir(path.join(dataDir, "assets"), { recursive: true });
-  await writeFile(path.join(dataDir, "assets", asset.id + ".jpg"), data);
-  put("asset", asset);
-  audit("asset.uploaded", asset.id);
-  return { asset, duplicate: false };
+  // The file goes first, so no library record ever points at a missing one.
+  const key = fileKey("assets", `${asset.id}.jpg`);
+  await files().write(key, data, "image/jpeg");
+  const result = await transaction(async () => {
+    const twin = (await list<Asset>("asset")).find(same);
+    if (twin) return { asset: twin, duplicate: true };
+    await put("asset", asset);
+    await audit("asset.uploaded", asset.id);
+    return { asset, duplicate: false };
+  });
+  // The same image arrived from another upload meanwhile.
+  if (result.duplicate)
+    await files()
+      .remove([key])
+      .catch(() => {});
+  return result;
+}
+
+// A multipart upload through this route (local studio and small files).
+async function upload(req: NextRequest) {
+  const bytes = await readLimited(req, UPLOAD_LIMIT, "Upload limit is 20 MB.");
+  const form = await new Response(bytes, {
+    headers: { "content-type": req.headers.get("content-type") || "" },
+  })
+    .formData()
+    .catch(() => {
+      throw new StudioError("The upload could not be read. Try again.");
+    });
+  const file = form.get("file");
+  if (!(file instanceof File) || file.size > UPLOAD_BYTES)
+    throw new StudioError("Choose a JPEG, PNG, or WebP under 20 MB.");
+  return importImage(
+    Buffer.from(await file.arrayBuffer()),
+    uploadFields.parse({
+      name: file.name,
+      rights: String(form.get("rights") || ""),
+      collection: String(form.get("collection") || ""),
+    }),
+  );
 }
 
 // Revisions are immutable, so an image a revision uses is only taken out of
 // the library; its file stays for the slideshows that use it.
 async function removeAssets(ids: string[]) {
-  const results = transaction(() =>
-    ids.map((id) => {
-      const asset = get<Asset>("asset", id);
-      if (assetInUse(id)) {
+  const results = await transaction(async () => {
+    const out: { asset: Asset; kept: boolean }[] = [];
+    for (const id of ids) {
+      const asset = await get<Asset>("asset", id);
+      if (await assetInUse(id)) {
         const item = { ...asset, removedAt: now() };
-        put("asset", item);
-        audit("asset.removed", id);
-        return { asset: item, kept: true };
+        await put("asset", item);
+        await audit("asset.removed", id);
+        out.push({ asset: item, kept: true });
+        continue;
       }
-      remove("asset", id);
-      audit("asset.deleted", id);
-      return { asset, kept: false };
-    }),
-  );
-  await Promise.all(
-    results
-      .filter((r) => !r.kept)
-      .map((r) =>
-        unlink(path.join(dataDir, "assets", `${r.asset.id}.jpg`)).catch(
-          () => {},
-        ),
-      ),
-  );
+      await remove("asset", id);
+      await audit("asset.deleted", id);
+      out.push({ asset, kept: false });
+    }
+    return out;
+  });
+  await files()
+    .remove(
+      results
+        .filter((r) => !r.kept)
+        .map((r) => fileKey("assets", `${r.asset.id}.jpg`)),
+    )
+    .catch(() => {});
   return results;
 }
 
 export async function GET(req: NextRequest) {
-  const denied = guard(req);
-  if (denied) return denied;
-  return NextResponse.json(state());
+  const who = await authorize(req);
+  if (who instanceof NextResponse) return who;
+  try {
+    return await withAccount(who, async () => NextResponse.json(await state()));
+  } catch (e) {
+    if (e instanceof StudioError)
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    logUnexpected("Studio load", e);
+    return NextResponse.json(
+      { error: "The studio could not load. Try again." },
+      { status: 500 },
+    );
+  }
 }
 export async function POST(req: NextRequest) {
-  const denied = guard(req);
-  if (denied) return denied;
+  const who = await authorize(req);
+  if (who instanceof NextResponse) return who;
   let action = "upload",
     target: string | undefined;
   try {
-    if (req.headers.get("content-type")?.includes("multipart/form-data"))
-      return NextResponse.json(await upload(req));
-    const input = await readJson(req);
-    action = z.string({ error: "Choose an action." }).parse(input.action);
-    if (typeof input.id === "string") target = input.id;
-    if (!ACTIONS.has(action)) throw new StudioError("Unknown action.");
-    if (action === "brand" || action === "format") {
-      // An id means "update this record"; it must exist at `expected`.
-      const expected =
-        input.expected === undefined
-          ? undefined
-          : z.number().int().parse(input.expected);
-      if (action === "brand") {
-        const data = brandSchema.parse(input.data);
-        return NextResponse.json(
-          transaction(() => {
-            const item: Brand = {
-              ...data,
-              id: data.id || uid(),
-              version: nextVersion("brand", data.id, expected),
-            };
-            put("brand", item);
-            return item;
-          }),
-        );
-      }
-      const data = formatSchema.parse(input.data);
-      return NextResponse.json(
-        transaction(() => {
-          const version = nextVersion("format", data.id, expected);
-          if (data.brandId) get<Brand>("brand", data.brandId);
-          const item: Format = {
-            ...data,
-            slideCount: data.structure?.length ?? data.slideCount,
-            id: data.id || uid(),
-            version,
-          };
-          put("format", item);
-          return item;
-        }),
-      );
-    }
-    if (action === "asset") {
-      const id = z.string().parse(input.id);
-      const asset = get<Asset>("asset", id);
-      const data = assetUpdateSchema.parse(input.data);
-      const item = { ...asset, ...data };
-      put("asset", item);
-      audit("asset.updated", id);
-      return NextResponse.json(item);
-    }
-    if (action === "removeAsset") {
-      const id = z.string().parse(input.id);
-      const [result] = await removeAssets([id]);
-      return NextResponse.json(result);
-    }
-    if (action === "removeAssets") {
-      const ids = z
-        .array(z.string(), { error: "Choose the images to delete." })
-        .min(1, { error: "Choose the images to delete." })
-        .max(5000)
-        .parse(input.ids);
-      const results = await removeAssets([...new Set(ids)]);
-      return NextResponse.json({
-        deleted: results.filter((r) => !r.kept).map((r) => r.asset),
-        kept: results.filter((r) => r.kept).map((r) => r.asset),
-      });
-    }
-    if (action === "hooks") {
-      const args = z
-        .object({
-          brandId: z.string(),
-          format: formatSchema,
-          prompt: z.string().trim().max(2000).default(""),
-          url: z.string().max(2000).optional(),
-        })
-        .parse(input);
-      const brand = get<Brand>("brand", args.brandId);
-      if ((args.format.hooks?.length ?? 0) > 190)
-        throw new StudioError(
-          "Keep at most 190 existing hooks before generating ten more.",
-        );
-      assertAiAvailable();
-      const source = args.prompt
-        ? undefined
-        : await readWebsite(args.url?.trim() || brand.destination);
-      const hooks = await generateHooks(
-        brand,
-        { ...args.format, id: args.format.id || "" },
-        args.prompt,
-        source,
-      );
-      return NextResponse.json({ hooks });
-    }
-    if (action === "ideas") {
-      const args = z
-        .object({
-          brandId: z.string(),
-          url: z.string().trim().min(1).max(2000),
-        })
-        .parse(input);
-      const brand = get<Brand>("brand", args.brandId);
-      assertAiAvailable();
-      const source = await readWebsite(args.url);
-      const ideas = await generateIdeas(brand, source);
-      return NextResponse.json({
-        source: { url: source.url, title: source.title },
-        ideas,
-      });
-    }
-    if (action === "save") {
-      const content = postSchema.parse(input.data);
-      get<Brand>("brand", content.brandId);
-      get<Format>("format", content.formatId);
-      content.slides.forEach((s) => {
-        slideAssetIds(s).forEach((id) => get<Asset>("asset", id));
-      });
-      return NextResponse.json(
-        savePost(
-          content,
-          input.id ? z.string().parse(input.id) : undefined,
-          input.expected === undefined
-            ? undefined
-            : z.number().int().parse(input.expected),
-        ),
-      );
-    }
-    if (action === "create") {
-      const args = z
-        .object({
-          brandId: z.string(),
-          formatId: z.string(),
-          topic: z.string().trim().min(1).max(2000),
-          mode: z.enum(["manual", "ai"]),
-          collection: z.string().optional(),
-          slideCount: z.number().int().min(2).max(10).optional(),
-          selectedHook: z.string().trim().min(1).max(180).optional(),
-        })
-        .parse(input);
-      const brand = get<Brand>("brand", args.brandId),
-        format = get<Format>("format", args.formatId);
-      // A saved structure fixes the slides; otherwise the popup's count applies.
-      const structure = slideStructure(
-        format,
-        args.slideCount ?? Math.min(format.slideCount, 10),
-      );
-      const slideCount = structure.length;
-      const copy =
-        args.mode === "ai"
-          ? await generateCopy(
-              brand,
-              format,
-              args.topic,
-              list<Post>("post")
-                .slice(0, 20)
-                .map((p) => p.slides[0].title),
-              slideCount,
-              args.selectedHook,
-            )
-          : {
-              title: args.topic.slice(0, 160),
-              caption: "",
-              flags: [],
-              slides: structure.map((slide, i) => ({
-                title:
-                  (i === 0 && args.selectedHook) ||
-                  slide.text ||
-                  (i === 0
-                    ? args.topic.slice(0, 180)
-                    : i === slideCount - 1
-                      ? "What will you try next?"
-                      : `Your idea ${i}`),
-                body: "",
-              })),
-            };
-      // Removed images stay on disk for old revisions but are never reused.
-      const library = list<Asset>("asset").filter((a) => !a.removedAt);
-      const assets = args.collection
-        ? library.filter((a) => a.collection === args.collection)
-        : [];
-      const postContent = {
-        title: copy.title,
-        topic: args.topic,
-        brandId: brand.id,
-        formatId: format.id,
-        aspect: format.aspect,
-        caption: copy.caption,
-        flags: copy.flags,
-        account: "",
-        plannedAt: "",
-        notes: "",
-        slides: copy.slides.map((s, i) => ({
-          ...s,
-          id: uid(),
-          role: structure[i].role,
-          assetId: assets[i]?.id || null,
-          background: format.color,
-          ink: format.ink,
-          accent: format.accent,
-          font: format.font,
-          align: "left",
-          position: "center",
-          fontSize: 82,
-          overlay: 0.4,
-        })),
-      } satisfies import("@/lib/schema").PostContent;
-      if (format.design === "photo" || format.font === "tiktok") {
-        const [font, semibold, regular] = await Promise.all([
-          photoFont(),
-          photoFont("semibold"),
-          photoFont("regular"),
-        ]);
-        // Formats without role templates use the template fallback, which
-        // honors their saved colors, exactly as the format preview does.
-        postContent.slides = postContent.slides.map((slide, index) =>
-          templateSlide(
-            slide,
-            format,
-            { default: font, semibold, regular },
-            library,
-            index,
-            args.collection,
-          ),
-        ) as typeof postContent.slides;
-      }
-      // Layout derives geometry from the copy; never persist a post that
-      // ordinary saves and rendering would then reject.
-      const checked = postSchema.safeParse(postContent);
-      if (!checked.success)
-        throw new StudioError(
-          `This format produced a slide that doesn't fit: ${describeIssues(checked.error.issues)} Adjust the format's text settings and try again.`,
-          422,
-        );
-      const post = savePost(checked.data);
-      return NextResponse.json(post);
-    }
-    const id = z.string().parse(input.id);
-    const post = get<Post>("post", id);
-    if (action === "duplicate") {
-      const suffix = " (copy)";
-      return NextResponse.json(
-        savePost({
-          ...contentOf(post),
-          title: post.title.slice(0, 160 - suffix.length) + suffix,
-          plannedAt: "",
-        }),
-      );
-    }
-    if (action === "render" || action === "approve") {
-      const revision = z.number().int().parse(input.revision);
-      if (post.revision !== revision)
-        throw new StudioError(
-          "Stale revision. Save and review the current version.",
-          409,
-        );
-      const { hashes } = await renderAll(id, revision);
-      if (action === "approve")
-        return NextResponse.json(approvePost(id, revision, hashes));
-      return NextResponse.json({ ready: true, revision });
-    }
-    if (action === "archive") return NextResponse.json(archivePost(id));
-    if (action === "restore") return NextResponse.json(restorePost(id));
-    if (action === "publish") {
-      const url = z.url().parse(input.url);
-      if (!TIKTOK_POST_URL.test(url))
-        throw new StudioError(
-          "Enter the HTTPS link of your published TikTok post (tiktok.com or vm.tiktok.com).",
-        );
-      const replace = input.replace === true;
-      const revision = z
-        .number({ error: "Reload the studio, then record the link again." })
-        .int()
-        .parse(input.revision);
-      return NextResponse.json(
-        transaction(() => {
-          const current = get<Post>("post", id);
-          // Only the revision the owner reviewed and exported may be marked
-          // published; a newer approval from another window must not be.
-          if (current.revision !== revision)
-            throw new StudioError(
-              "This slideshow changed in another window. Reload to review the current version before recording its link.",
-              409,
-            );
-          assertApproval(current);
-          // Changing a recorded link must be deliberate, never a silent overwrite.
-          if (current.status === "published" && !replace)
-            throw new StudioError(
-              "This post is already recorded as published. Use “Correct link” to change its URL.",
-              409,
-            );
-          const corrected = current.status === "published";
-          current.status = "published";
-          current.publishedUrl = url;
-          if (!corrected) current.publishedAt = now();
-          put("post", current);
-          audit(
-            corrected
-              ? "publication.url_corrected"
-              : "publication.owner_confirmed",
-            id,
-          );
-          return current;
-        }),
-      );
-    }
-    if (action === "metrics") {
-      if (post.status !== "published")
-        throw new StudioError("Record a published post before adding results.");
-      const snapshot = {
-        ...metricsSchema.parse(input.data),
-        measuredAt: now(),
-      };
-      // Keep earlier snapshots so results can be compared over time.
-      post.metricsHistory = [
-        ...(post.metricsHistory ?? []),
-        ...(post.metrics ? [post.metrics] : []),
-      ].slice(-MAX_METRIC_SNAPSHOTS);
-      post.metrics = snapshot;
-      put("post", post);
-      audit("results.recorded", id);
-      return NextResponse.json(post);
-    }
-    throw new StudioError("Unknown action.");
+    return await withAccount(who, async () => {
+      if (req.headers.get("content-type")?.includes("multipart/form-data"))
+        return NextResponse.json(await upload(req));
+      const input = await readJson(req);
+      action = z.string({ error: "Choose an action." }).parse(input.action);
+      if (typeof input.id === "string") target = input.id;
+      if (!ACTIONS.has(action)) throw new StudioError("Unknown action.");
+      return await handle(action, input);
+    });
   } catch (e) {
     if (e instanceof StudioError)
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -583,4 +289,356 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+async function handle(action: string, input: Record<string, unknown>) {
+  if (action === "brand" || action === "format") {
+    // An id means "update this record"; it must exist at `expected`.
+    const expected =
+      input.expected === undefined
+        ? undefined
+        : z.number().int().parse(input.expected);
+    if (action === "brand") {
+      const data = brandSchema.parse(input.data);
+      return NextResponse.json(
+        await transaction(async () => {
+          const item: Brand = {
+            ...data,
+            id: data.id || uid(),
+            version: await nextVersion("brand", data.id, expected),
+          };
+          await put("brand", item);
+          return item;
+        }),
+      );
+    }
+    const data = formatSchema.parse(input.data);
+    return NextResponse.json(
+      await transaction(async () => {
+        const version = await nextVersion("format", data.id, expected);
+        if (data.brandId) await get<Brand>("brand", data.brandId);
+        const item: Format = {
+          ...data,
+          slideCount: data.structure?.length ?? data.slideCount,
+          id: data.id || uid(),
+          version,
+        };
+        await put("format", item);
+        return item;
+      }),
+    );
+  }
+  if (action === "asset") {
+    const id = z.string().parse(input.id);
+    const data = assetUpdateSchema.parse(input.data);
+    // Read and written together, so an edit can't bring back an image that
+    // was deleted a moment earlier.
+    return NextResponse.json(
+      await transaction(async () => {
+        const item = { ...(await get<Asset>("asset", id)), ...data };
+        await put("asset", item);
+        await audit("asset.updated", id);
+        return item;
+      }),
+    );
+  }
+  if (action === "removeAsset") {
+    const id = z.string().parse(input.id);
+    const [result] = await removeAssets([id]);
+    return NextResponse.json(result);
+  }
+  if (action === "removeAssets") {
+    const ids = z
+      .array(z.string(), { error: "Choose the images to delete." })
+      .min(1, { error: "Choose the images to delete." })
+      .max(5000)
+      .parse(input.ids);
+    const results = await removeAssets([...new Set(ids)]);
+    return NextResponse.json({
+      deleted: results.filter((r) => !r.kept).map((r) => r.asset),
+      kept: results.filter((r) => r.kept).map((r) => r.asset),
+    });
+  }
+  // Browsers send image bytes straight to storage, which keeps them clear
+  // of the hosting platform's request size limit, then ask for the import.
+  if (action === "uploadUrl") {
+    const id = uid();
+    return NextResponse.json({
+      id,
+      url: await files().uploadUrl(fileKey("uploads", id)),
+    });
+  }
+  if (action === "importUpload") {
+    const id = z.uuid({ error: "Upload the image again." }).parse(input.id);
+    const key = fileKey("uploads", id);
+    const bytes = await files().read(key);
+    if (!bytes)
+      throw new StudioError("The upload did not arrive. Try again.", 404);
+    try {
+      return NextResponse.json(
+        await importImage(bytes, uploadFields.parse(input)),
+      );
+    } finally {
+      await files()
+        .remove([key])
+        .catch(() => {});
+    }
+  }
+  if (action === "hooks") {
+    const args = z
+      .object({
+        brandId: z.string(),
+        format: formatSchema,
+        prompt: z.string().trim().max(2000).default(""),
+        url: z.string().max(2000).optional(),
+      })
+      .parse(input);
+    const brand = await get<Brand>("brand", args.brandId);
+    if ((args.format.hooks?.length ?? 0) > 190)
+      throw new StudioError(
+        "Keep at most 190 existing hooks before generating ten more.",
+      );
+    await assertAiAvailable();
+    const source = args.prompt
+      ? undefined
+      : await readWebsite(args.url?.trim() || brand.destination);
+    const hooks = await generateHooks(
+      brand,
+      { ...args.format, id: args.format.id || "" },
+      args.prompt,
+      source,
+    );
+    return NextResponse.json({ hooks });
+  }
+  if (action === "ideas") {
+    const args = z
+      .object({
+        brandId: z.string(),
+        url: z.string().trim().min(1).max(2000),
+      })
+      .parse(input);
+    const brand = await get<Brand>("brand", args.brandId);
+    await assertAiAvailable();
+    const source = await readWebsite(args.url);
+    const ideas = await generateIdeas(brand, source);
+    return NextResponse.json({
+      source: { url: source.url, title: source.title },
+      ideas,
+    });
+  }
+  if (action === "save") {
+    const content = postSchema.parse(input.data);
+    return NextResponse.json(
+      await savePost(
+        content,
+        input.id ? z.string().parse(input.id) : undefined,
+        input.expected === undefined
+          ? undefined
+          : z.number().int().parse(input.expected),
+      ),
+    );
+  }
+  if (action === "create") {
+    const args = z
+      .object({
+        brandId: z.string(),
+        formatId: z.string(),
+        topic: z.string().trim().min(1).max(2000),
+        mode: z.enum(["manual", "ai"]),
+        collection: z.string().optional(),
+        slideCount: z.number().int().min(2).max(10).optional(),
+        selectedHook: z.string().trim().min(1).max(180).optional(),
+      })
+      .parse(input);
+    const brand = await get<Brand>("brand", args.brandId),
+      format = await get<Format>("format", args.formatId);
+    // A saved structure fixes the slides; otherwise the popup's count applies.
+    const structure = slideStructure(
+      format,
+      args.slideCount ?? Math.min(format.slideCount, 10),
+    );
+    const slideCount = structure.length;
+    const copy =
+      args.mode === "ai"
+        ? await generateCopy(
+            brand,
+            format,
+            args.topic,
+            (await list<Post>("post"))
+              .slice(0, 20)
+              .map((p) => p.slides[0].title),
+            slideCount,
+            args.selectedHook,
+          )
+        : {
+            title: args.topic.slice(0, 160),
+            caption: "",
+            flags: [],
+            slides: structure.map((slide, i) => ({
+              title:
+                (i === 0 && args.selectedHook) ||
+                slide.text ||
+                (i === 0
+                  ? args.topic.slice(0, 180)
+                  : i === slideCount - 1
+                    ? "What will you try next?"
+                    : `Your idea ${i}`),
+              body: "",
+            })),
+          };
+    // Removed images stay in storage for old revisions but are never reused.
+    const library = (await list<Asset>("asset")).filter((a) => !a.removedAt);
+    const assets = args.collection
+      ? library.filter((a) => a.collection === args.collection)
+      : [];
+    const postContent = {
+      title: copy.title,
+      topic: args.topic,
+      brandId: brand.id,
+      formatId: format.id,
+      aspect: format.aspect,
+      caption: copy.caption,
+      flags: copy.flags,
+      account: "",
+      plannedAt: "",
+      notes: "",
+      slides: copy.slides.map((s, i) => ({
+        ...s,
+        id: uid(),
+        role: structure[i].role,
+        assetId: assets[i]?.id || null,
+        background: format.color,
+        ink: format.ink,
+        accent: format.accent,
+        font: format.font,
+        align: "left",
+        position: "center",
+        fontSize: 82,
+        overlay: 0.4,
+      })),
+    } satisfies import("@/lib/schema").PostContent;
+    if (format.design === "photo" || format.font === "tiktok") {
+      const [font, semibold, regular] = await Promise.all([
+        photoFont(),
+        photoFont("semibold"),
+        photoFont("regular"),
+      ]);
+      // Formats without role templates use the template fallback, which
+      // honors their saved colors, exactly as the format preview does.
+      postContent.slides = postContent.slides.map((slide, index) =>
+        templateSlide(
+          slide,
+          format,
+          { default: font, semibold, regular },
+          library,
+          index,
+          args.collection,
+        ),
+      ) as typeof postContent.slides;
+    }
+    // Layout derives geometry from the copy; never persist a post that
+    // ordinary saves and rendering would then reject.
+    const checked = postSchema.safeParse(postContent);
+    if (!checked.success)
+      throw new StudioError(
+        `This format produced a slide that doesn't fit: ${describeIssues(checked.error.issues)} Adjust the format's text settings and try again.`,
+        422,
+      );
+    const post = await savePost(checked.data);
+    return NextResponse.json(post);
+  }
+  // Actions that change a post read it inside the account transaction; a
+  // copy read earlier could overwrite a change made in between.
+  const id = z.string().parse(input.id);
+  if (action === "duplicate") {
+    const post = await get<Post>("post", id);
+    const suffix = " (copy)";
+    return NextResponse.json(
+      await savePost({
+        ...contentOf(post),
+        title: post.title.slice(0, 160 - suffix.length) + suffix,
+        plannedAt: "",
+      }),
+    );
+  }
+  if (action === "render" || action === "approve") {
+    const revision = z.number().int().parse(input.revision);
+    // approvePost checks the revision again under the lock.
+    if ((await get<Post>("post", id)).revision !== revision)
+      throw new StudioError(
+        "Stale revision. Save and review the current version.",
+        409,
+      );
+    const { hashes } = await renderAll(id, revision);
+    if (action === "approve")
+      return NextResponse.json(await approvePost(id, revision, hashes));
+    return NextResponse.json({ ready: true, revision });
+  }
+  if (action === "archive") return NextResponse.json(await archivePost(id));
+  if (action === "restore") return NextResponse.json(await restorePost(id));
+  if (action === "publish") {
+    const url = z.url().parse(input.url);
+    if (!TIKTOK_POST_URL.test(url))
+      throw new StudioError(
+        "Enter the HTTPS link of your published TikTok post (tiktok.com or vm.tiktok.com).",
+      );
+    const replace = input.replace === true;
+    const revision = z
+      .number({ error: "Reload the studio, then record the link again." })
+      .int()
+      .parse(input.revision);
+    return NextResponse.json(
+      await transaction(async () => {
+        const current = await get<Post>("post", id);
+        // Only the revision the owner reviewed and exported may be marked
+        // published; a newer approval from another window must not be.
+        if (current.revision !== revision)
+          throw new StudioError(
+            "This slideshow changed in another window. Reload to review the current version before recording its link.",
+            409,
+          );
+        await assertApproval(current);
+        // Changing a recorded link must be deliberate, never a silent overwrite.
+        if (current.status === "published" && !replace)
+          throw new StudioError(
+            "This post is already recorded as published. Use “Correct link” to change its URL.",
+            409,
+          );
+        const corrected = current.status === "published";
+        current.status = "published";
+        current.publishedUrl = url;
+        if (!corrected) current.publishedAt = now();
+        await put("post", current);
+        await audit(
+          corrected
+            ? "publication.url_corrected"
+            : "publication.owner_confirmed",
+          id,
+        );
+        return current;
+      }),
+    );
+  }
+  if (action === "metrics") {
+    const data = metricsSchema.parse(input.data);
+    return NextResponse.json(
+      await transaction(async () => {
+        const post = await get<Post>("post", id);
+        if (post.status !== "published")
+          throw new StudioError(
+            "Record a published post before adding results.",
+          );
+        // Keep earlier snapshots so results can be compared over time.
+        post.metricsHistory = [
+          ...(post.metricsHistory ?? []),
+          ...(post.metrics ? [post.metrics] : []),
+        ].slice(-MAX_METRIC_SNAPSHOTS);
+        post.metrics = { ...data, measuredAt: now() };
+        await put("post", post);
+        await audit("results.recorded", id);
+        return post;
+      }),
+    );
+  }
+  throw new StudioError("Unknown action.");
 }

@@ -355,11 +355,10 @@ export function UploadModal({
             let added = 0,
               duplicates = 0;
             for (const file of files) {
-              const fd = new FormData();
-              fd.set("file", file);
-              fd.set("collection", String(data.get("collection")));
-              fd.set("rights", String(data.get("rights")));
-              const body = await uploadImage(fd).catch((e: Error) => {
+              const body = await uploadImage(file, {
+                collection: String(data.get("collection")),
+                rights: String(data.get("rights")),
+              }).catch((e: Error) => {
                 throw new Error(
                   `${added ? `${plural(added, "image")} added. ` : ""}${file.name}: ${e.message}`,
                 );

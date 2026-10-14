@@ -23,13 +23,15 @@ import {
 } from "../src/lib/photo-layout";
 import { postSchema, photoTextSchema, type Post } from "../src/lib/schema";
 import { seedSamplePost } from "./sample-post";
+import { closeTestDatabase, prepareTestDatabase } from "./database";
 const folder = mkdtempSync(path.join(tmpdir(), "slideo-photo-test-"));
 process.env.STUDIO_DATA_DIR = folder;
 const store = await import("../src/lib/store");
+await prepareTestDatabase();
 const { photoFont, renderPhotoSlide } = await import("../src/lib/photo-render");
 const { renderAll } = await import("../src/lib/render");
 const font = await photoFont();
-const original = seedSamplePost(store);
+const original = await seedSamplePost(store);
 const reference = defaultText(
   "5 changes i made to detach\nfrom emotional betting:",
   "text-1",
@@ -39,14 +41,15 @@ const regressionCopy = [
   "Check The Vig Too\n\nComparing vig can add context when reviewing which supported market may fit a promotion.",
   "Keep Risk In The Frame\n\nBetter information does not remove betting risk. Set limits, and never chase losses.",
 ];
-after(() => {
-  store.database().close();
+after(async () => {
+  await store.closeStore();
+  await closeTestDatabase();
   rmSync(folder, { recursive: true, force: true });
 });
 
-test("TikTok preset preserves existing posts and matches the reference defaults", () => {
+test("TikTok preset preserves existing posts and matches the reference defaults", async () => {
   assert.equal(
-    store.get<{ design: string }>("format", "tiktok-photo").design,
+    (await store.get<{ design: string }>("format", "tiktok-photo")).design,
     "photo",
   );
   assert.equal(original.slides[0].design, undefined);
@@ -178,13 +181,19 @@ test("photo renders bypass old cached images without changing the saved content"
       },
     ],
   });
-  const post = store.savePost(content);
+  const post = await store.savePost(content);
   const stale = await sharp({
     create: { width: 10, height: 10, channels: 3, background: "red" },
   })
     .jpeg()
     .toBuffer();
-  const prefix = path.join(folder, "renders", `${post.id}-${post.revision}-0`);
+  const prefix = path.join(
+    folder,
+    "files",
+    "local",
+    "renders",
+    `${post.id}-${post.revision}-0`,
+  );
   mkdirSync(path.dirname(prefix), { recursive: true });
   writeFileSync(`${prefix}.jpg`, stale);
   const { buffers, hashes } = await renderAll(post.id, post.revision);
@@ -195,8 +204,11 @@ test("photo renders bypass old cached images without changing the saved content"
     buffers[0],
   );
   assert.deepEqual(readFileSync(`${prefix}.jpg`), stale);
-  assert.deepEqual(store.revisionContent(post.id, post.revision), content);
-  assert.equal(store.get<Post>("post", post.id).status, "needs_review");
+  assert.deepEqual(
+    await store.revisionContent(post.id, post.revision),
+    content,
+  );
+  assert.equal((await store.get<Post>("post", post.id)).status, "needs_review");
 });
 
 test("image fit, crop, position and zoom use identical deterministic geometry", () => {
@@ -227,7 +239,7 @@ test("photo settings persist across revisions, export and approval invalidation"
     aspect: "story",
     slides: [slide],
   });
-  const post = store.savePost(content);
+  const post = await store.savePost(content);
   const { buffers, hashes } = await renderAll(post.id, post.revision);
   const metadata = await sharp(buffers[0]).metadata();
   assert.deepEqual([metadata.width, metadata.height], [1080, 1920]);
@@ -237,9 +249,9 @@ test("photo settings persist across revisions, export and approval invalidation"
     .toBuffer();
   const corner = await sharp(cornerBuffer).stats();
   assert.ok(corner.channels.every((channel) => channel.max < 5));
-  const approved = store.approvePost(post.id, post.revision, hashes);
-  assert.deepEqual(store.assertApproval(approved), hashes);
-  const edited = store.savePost(
+  const approved = await store.approvePost(post.id, post.revision, hashes);
+  assert.deepEqual(await store.assertApproval(approved), hashes);
+  const edited = await store.savePost(
     {
       ...content,
       slides: [
@@ -251,10 +263,10 @@ test("photo settings persist across revisions, export and approval invalidation"
   );
   assert.equal(edited.slides[0].textLayers![0].x, 10);
   assert.equal(
-    store.revisionContent(post.id, 1).slides[0].textLayers![0].x,
+    (await store.revisionContent(post.id, 1)).slides[0].textLayers![0].x,
     16,
   );
-  assert.throws(() => store.assertApproval(edited));
+  await assert.rejects(() => store.assertApproval(edited));
   assert.throws(() => photoTextSchema.parse({ ...reference, size: 0 }));
 });
 
@@ -273,9 +285,9 @@ test("photo export rejects overflowing or off-canvas text", async () => {
 });
 
 test("photo rendering includes images, letterboxing and darkening", async () => {
-  mkdirSync(path.join(folder, "assets"), { recursive: true });
+  mkdirSync(path.join(folder, "files", "local", "assets"), { recursive: true });
   writeFileSync(
-    path.join(folder, "assets", "test-photo.jpg"),
+    path.join(folder, "files", "local", "assets", "test-photo.jpg"),
     await sharp({
       create: { width: 400, height: 200, channels: 3, background: "#e04020" },
     })
