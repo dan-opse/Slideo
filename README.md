@@ -20,11 +20,21 @@ A hosted studio has accounts: people sign up with an email and password, and eac
 1. **Create or select a Supabase project.**
 2. **Turn on the Data API** (**Project Settings → Data API**), with `public` among the exposed schemas. You can leave automatic exposure of new tables off: the setup script grants exactly what the studio needs.
 3. **Install the schema once.** Open **SQL Editor → New query**, paste the contents of [`supabase/migrations/20261014013833_slideo_api.sql`](supabase/migrations/20261014013833_slideo_api.sql), and run it. (With the Supabase CLI linked to the project, `supabase db push` does the same.) It creates the tables, the `slideo_*` functions the studio calls, and the two private buckets. Running it again is safe: it adds what is missing and never removes data. A project set up by an earlier preview of this branch upgrades the same way, keeping its rows.
-4. **Configure sign-in.** In **Authentication → URL Configuration**, set the Site URL to your Vercel domain and add `https://<your-domain>/auth/confirm` (and your preview domains' `/auth/confirm`) to the redirect URLs. Supabase's built-in email sender is rate-limited; add your own SMTP provider under **Authentication → Emails** before inviting many people.
+4. **Configure sign-in.** In **Authentication → URL Configuration**, set the Site URL to your Vercel domain and add `https://<your-domain>/auth/confirm` (and your preview domains' `/auth/confirm`) to the redirect URLs. Sign-up confirmations and password reset links both return there, so there is nothing more to add for password recovery. Before anyone outside your Supabase team signs up, set up your own email sender; see "Email and password recovery" below.
 5. **Add three environment variables in Vercel** (all from **Project Settings → API Keys**; see `.env.example`), plus `OPENAI_API_KEY` if you want AI writing:
    - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: public, used by browsers to sign in.
    - `SUPABASE_SECRET_KEY`: server-only. Mark it **Sensitive** and never give it a `NEXT_PUBLIC_` prefix.
-6. **Deploy a preview** and test it: sign up and confirm the email, upload an image, create and approve a slideshow, download its package, sign out, and check that a second account sees none of the first one's work.
+6. **Deploy a preview** and test it: sign up and confirm the email, upload an image, create and approve a slideshow, download its package, sign out, reset your password from **Forgot your password?**, sign in with the new one, and check that a second account sees none of the first one's work.
+
+### Email and password recovery
+
+Supabase sends the sign-up confirmations and password reset emails. Its built-in sender is for trying things out: it delivers only to the email addresses of your Supabase organization's team members, and only a couple of messages an hour across the whole project. When it runs out, sign-up shows "The studio has sent as many emails as it can for now", and the limit recovers within the hour. To accept anyone's address, add your own SMTP provider under **Authentication → Emails → SMTP Settings** (then raise the hourly limit under **Authentication → Rate Limits**). Don't turn off email confirmation to work around the limit.
+
+**Forgot your password?** on the sign-in page emails a reset link. It answers the same way whether or not the address has an account, so it can't be used to find out who has one; the server log records Supabase's actual reason (such as a rate limit). The link signs the account in on a **Choose a new password** page. Saving the new password signs that browser out (other devices lose their sessions within the hour, once their access token expires) and returns to the sign-in page. The account's id, slideshows, and images are unchanged. Links work once, for an hour (Supabase's **Email OTP expiration**), and only in the browser that asked for them, because that browser holds half of the link's proof. An expired, used, or misplaced link explains what happened and offers a new one.
+
+If people often request a link on one device and open it on another, change the **Reset password** template under **Authentication → Emails** to link to `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery`. The studio accepts that form from any browser. (The Site URL must then be the address people use.)
+
+An account that signs in before confirming its email is told so and offered **Send the confirmation link again**.
 
 Why a secret key as well as the publishable one: rendered slides, approvals, the audit trail, and the AI allowance must be written only by the studio's server, after it renders and checks the slides. Anything a signed-in browser's own session can call, that person can also call outside the app, so browsers get no direct access to the tables, functions, or buckets at all. The server verifies each request's session, then acts for exactly that account with the secret key. If any of the three settings is missing, or the project lacks the setup SQL, the studio answers with a "not fully set up" error and logs the reason; it never falls back to local files.
 
@@ -113,6 +123,13 @@ npm run test:supabase
 ```
 
 That run also includes `tests/hosted.test.ts`, which signs in two accounts and checks uploads, a package over 20 MB, account isolation, and that a browser's own session can't reach the tables, functions, or buckets.
+
+To walk a production build through sign-up, confirmation, uploads, approval, export, account isolation, and password recovery as a browser would, with emails read from the local stack's mail catcher:
+
+```bash
+npm run build && npm start   # with the local stack's three values in .env.local
+MAILPIT_URL=http://127.0.0.1:55424 node --import tsx scripts/hosted-check.ts http://localhost:3000
+```
 
 CI (`.github/workflows/ci.yml`) runs these plus a Prettier check and `npm audit --omit=dev` on every pull request. Linting uses [oxlint](https://oxc.rs), because `typescript-eslint` does not support TypeScript 7.
 

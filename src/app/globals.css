@@ -1001,6 +1001,16 @@ nav button svg {
   color: #9d5e38;
   background: #fff0e8;
 }
+.login-link {
+  align-self: center;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.login-link:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
 .profile > div {
   min-width: 0;
 }
