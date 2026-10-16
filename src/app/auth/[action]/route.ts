@@ -42,7 +42,7 @@ const refused = (action: string, error: AuthFailure, shown: string | null) =>
       code: error.code,
       status: error.status,
       name: error.name,
-      ...(!shown && { message: error.message }),
+      ...((!shown || shown === LINK_SENT) && { message: error.message }),
     }),
   );
 const SERVICE_PROBLEM = "Something went wrong. Try again in a few minutes.";
@@ -57,9 +57,16 @@ export async function POST(
     return new NextResponse("Cross-site requests are not allowed.", {
       status: 403,
     });
-  const linkRequest = action === "forgot" || action === "resend";
-  const supabase = await sessionClient({ held: linkRequest });
+  const supabase = sessionClient(request, {
+    held: action === "forgot" || action === "resend",
+  });
   if (!supabase) return back("/");
+  return supabase.send(await act(action, request, supabase));
+}
+
+type Session = NonNullable<ReturnType<typeof sessionClient>>;
+
+async function act(action: string, request: NextRequest, supabase: Session) {
   if (action === "signout") {
     await supabase.auth.signOut();
     return back("/login");
@@ -70,7 +77,7 @@ export async function POST(
     password = field("password");
 
   // Emails a link without saying whether the address has an account.
-  if (linkRequest) {
+  if (action === "forgot" || action === "resend") {
     const page = action === "forgot" ? "/login/forgot" : "/login";
     if (!email) return back(page, { error: "Enter your email address." });
     const { error } =
@@ -83,19 +90,18 @@ export async function POST(
             email,
             options: { emailRedirectTo: confirmUrl(request) },
           });
-    // Each request stores half of its link's proof (a PKCE verifier) in a
-    // cookie, and Supabase matches a link to the address's newest request,
-    // even one it refused for sending too soon. So the browser keeps the
-    // proof of a sent or rate-limited request, and keeps its previous one
-    // (for the link already sent) when the request was refused before that.
-    if (!error) supabase.keep();
-    else if (error.code === "over_email_send_rate_limit")
-      supabase.keep({ firstOnly: true });
     const shown = error ? emailLinkMessage(error) : LINK_SENT;
     if (error) refused(action, error, shown);
-    return shown === LINK_SENT
-      ? back(page, { message: LINK_SENT })
-      : back(page, { error: shown });
+    if (shown !== LINK_SENT) return back(page, { error: shown });
+    // Each request stores half of its link's proof (a PKCE verifier) in a
+    // cookie, and Supabase matches a link to the address's newest request,
+    // even one it refused for sending too soon. Whenever the answer is the
+    // neutral one, the response carries the cookies as the request stored
+    // them, whatever Supabase said, so they can't tell a sent email from a
+    // refused one either. (Refusals with their own message happen before
+    // Supabase looks up the address, and keep the browser's previous proof.)
+    supabase.keep({ firstOnly: true });
+    return back(page, { message: LINK_SENT });
   }
 
   // The new password, set from the session a reset link signed in.
@@ -169,7 +175,7 @@ export async function GET(
   const { action } = await params;
   if (action !== "confirm")
     return new NextResponse("Not found", { status: 404 });
-  const supabase = await sessionClient();
+  const supabase = sessionClient(request);
   if (!supabase) return back("/");
   const query = request.nextUrl.searchParams;
   const code = query.get("code"),
@@ -199,7 +205,9 @@ export async function GET(
   if (error) {
     const shown = emailLinkFailure(error);
     refused("an email link", error, shown);
-    return back(recovery ? "/login/forgot" : "/login", { error: shown });
+    return supabase.send(
+      back(recovery ? "/login/forgot" : "/login", { error: shown }),
+    );
   }
-  return back(recovery ? "/login/reset" : "/");
+  return supabase.send(back(recovery ? "/login/reset" : "/"));
 }

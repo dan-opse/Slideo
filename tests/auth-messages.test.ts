@@ -23,8 +23,11 @@ import {
 const api = (code: string, status: number, message = code) =>
   new AuthApiError(message, status, code);
 const unreachable = new AuthRetryableFetchError("fetch failed", 0);
-const serverFault = new AuthUnknownError("bad gateway", null);
-(serverFault as { status?: number }).status = 502;
+// What the SDK makes of an HTTP 5xx answer (see tests/auth-routes.test.ts
+// for the same through its real HTTP handling).
+const serverFault = new AuthRetryableFetchError("Bad Gateway", 502);
+const unknownFault = new AuthUnknownError("bad gateway", null);
+(unknownFault as { status?: number }).status = 502;
 
 test("sign-in tells a wrong password apart from setup and service problems", () => {
   assert.equal(
@@ -39,6 +42,7 @@ test("sign-in tells a wrong password apart from setup and service problems", () 
   for (const outage of [
     unreachable,
     serverFault,
+    unknownFault,
     api("unexpected_failure", 500),
   ])
     assert.match(signInMessage(outage)!, /unavailable/, String(outage.status));
@@ -79,7 +83,8 @@ test("asking for a link never reveals whether the email has an account", () => {
     ),
     api("over_email_send_rate_limit", 429, "email rate limit exceeded"),
     api("email_address_not_authorized", 400),
-    api("unexpected_failure", 500, "Error sending recovery email"),
+    new AuthRetryableFetchError("Error sending recovery email", 500),
+    serverFault,
   ])
     assert.equal(emailLinkMessage(refusal), LINK_SENT, refusal.message);
   // These don't depend on any account.

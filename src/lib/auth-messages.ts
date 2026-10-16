@@ -84,8 +84,11 @@ export function emailLinkMessage(error: AuthFailure) {
   if (error.code === "email_address_invalid")
     return "Enter a valid email address.";
   if (error.code === "over_request_rate_limit") return TOO_MANY;
-  // Unreachable before any account lookup: safe to say so.
-  if (!error.status || error.name === "AuthRetryableFetchError")
+  // No answer from Auth at all (status 0): it never saw the address, so
+  // saying so reveals nothing. Any answer, even a server error, may come
+  // from trying to email a real account (the SDK reports HTTP 5xx as a
+  // retryable fetch error too), so it gets the neutral answer.
+  if (!error.status)
     return "Email can't be sent right now. Try again in a few minutes.";
   return LINK_SENT;
 }
