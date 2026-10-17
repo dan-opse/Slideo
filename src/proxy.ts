@@ -28,7 +28,10 @@ export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
   // API routes answer 401 themselves; the sign-in flow must stay reachable.
   const open =
-    path.startsWith("/api/") || path.startsWith("/auth/") || path === "/login";
+    path.startsWith("/api/") ||
+    path.startsWith("/auth/") ||
+    path === "/login" ||
+    path.startsWith("/login/");
   if (!signedIn && !open)
     return NextResponse.redirect(new URL("/login", request.url));
   if (signedIn && path === "/login")

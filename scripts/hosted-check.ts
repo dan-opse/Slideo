@@ -1,5 +1,6 @@
 // Walks a running hosted studio through sign-in, upload, approval, export,
-// account isolation, and sign-out over plain HTTP, as a browser would.
+// account isolation, and sign-out over plain HTTP, as a browser would. With
+// MAILPIT_URL it also resets the first account's password from the email.
 //
 //   node --import tsx scripts/hosted-check.ts <studio URL>
 //
@@ -10,6 +11,11 @@
 // slideshows and images in those accounts; use test accounts.
 import { randomBytes } from "node:crypto";
 import sharp from "sharp";
+import {
+  LINK_EXPIRED,
+  LINK_OTHER_BROWSER,
+  LINK_SENT,
+} from "../src/lib/auth-messages";
 
 const [base] = process.argv.slice(2);
 if (!base) {
@@ -80,6 +86,28 @@ function check(ok: unknown, what: string, detail?: unknown) {
 }
 const location = (response: Response) => response.headers.get("location") ?? "";
 
+// The Supabase link in the newest email to `email` whose subject has `subject`.
+async function emailLink(mailpit: string, email: string, subject: string) {
+  const query = encodeURIComponent(`to:${email} subject:"${subject}"`);
+  for (let i = 0; i < 40; i++) {
+    const found = await (
+      await fetch(`${mailpit}/api/v1/search?query=${query}`)
+    ).json();
+    const id = found.messages?.[0]?.ID;
+    if (id) {
+      const message = await (
+        await fetch(`${mailpit}/api/v1/message/${id}`)
+      ).json();
+      return {
+        link: String(message.Text).match(/https?:\/\/\S+verify\S+/)?.[0] ?? "",
+        count: Number(found.messages_count ?? found.messages.length),
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return { link: "", count: 0 };
+}
+
 // A new account through the sign-up form, confirmed from its email.
 async function signUp(mailpit: string) {
   const email = `check-${Date.now()}-${randomBytes(3).toString("hex")}@example.com`,
@@ -93,24 +121,23 @@ async function signUp(mailpit: string) {
   );
   const early = await new Browser().form("/auth/signin", { email, password });
   check(
-    location(early).startsWith("/login?error="),
-    "an unconfirmed account cannot sign in",
+    location(early).startsWith("/login?error=Confirm+your+email") &&
+      location(early).includes("resend=1"),
+    "an unconfirmed account cannot sign in, and is offered a new link",
+    location(early),
   );
-  let link = "";
-  for (let i = 0; i < 40 && !link; i++) {
-    const found = await (
-      await fetch(
-        `${mailpit}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`,
-      )
-    ).json();
-    const id = found.messages?.[0]?.ID;
-    if (id) {
-      const message = await (
-        await fetch(`${mailpit}/api/v1/message/${id}`)
-      ).json();
-      link = String(message.Text).match(/https?:\/\/\S+verify\S+/)?.[0] ?? "";
-    } else await new Promise((resolve) => setTimeout(resolve, 250));
-  }
+  const resent = await new Browser().form("/auth/resend", { email });
+  check(
+    location(resent) ===
+      `/login?${new URLSearchParams({ message: LINK_SENT })}`,
+    "asking for the confirmation link again gets the neutral answer",
+    location(resent),
+  );
+  // The browser that signed up keeps the newest link's proof, and Supabase
+  // keeps only the newest link: wait out its per-address limit and resend.
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  await browser.form("/auth/resend", { email });
+  const { link } = await emailLink(mailpit, email, "Confirm");
   check(link, "the confirmation email arrived");
   // Supabase verifies the link, then sends the browser to /auth/confirm.
   const verified = await fetch(link, { redirect: "manual" });
@@ -306,6 +333,146 @@ check(
   (await alice.browser.go("/api/studio")).status === 401,
   "after signing out, the browser's requests are refused",
 );
+
+// Password recovery, from the reset email (needs the local mail catcher).
+if (mailpit) {
+  const neutral = `/login/forgot?${new URLSearchParams({ message: LINK_SENT })}`;
+  const stranger = await new Browser().form("/auth/forgot", {
+    email: `nobody-${randomBytes(4).toString("hex")}@example.com`,
+  });
+  check(
+    location(stranger) === neutral,
+    "a reset for an unknown email gets the neutral answer",
+    location(stranger),
+  );
+  const resetter = new Browser();
+  const asked = await resetter.form("/auth/forgot", { email: alice.email });
+  // Straight away again: Supabase refuses it (one per address per interval)
+  // only because the account exists, so the answer must not change, and
+  // the first link must keep working in this browser.
+  const again = await resetter.form("/auth/forgot", { email: alice.email });
+  check(
+    location(asked) === neutral && location(again) === neutral,
+    "a real account's reset, and a refused repeat, get the same answer",
+    [location(asked), location(again)],
+  );
+  const reset = await emailLink(mailpit, alice.email, "Reset");
+  check(
+    reset.count === 1,
+    "the repeat was refused, so one reset email was sent",
+    reset.count,
+  );
+  const verified = await fetch(reset.link, { redirect: "manual" });
+  const landing = location(verified);
+  check(
+    landing.startsWith(`${site}/auth/confirm?code=`),
+    "the reset link returns to the studio's /auth/confirm",
+    landing,
+  );
+  const opened = await resetter.go(landing);
+  check(
+    location(opened) === "/login/reset",
+    "the reset link opens the new-password form",
+    location(opened),
+  );
+  const formPage = await resetter.go("/login/reset");
+  const html = await formPage.text();
+  check(
+    formPage.status === 200 &&
+      html.includes("Choose a new password") &&
+      html.includes(alice.email),
+    "the form names the account being reset",
+  );
+  const newPassword = `new-${randomBytes(9).toString("hex")}`;
+  const mismatch = await resetter.form("/auth/reset", {
+    password: newPassword,
+    confirm: `${newPassword}x`,
+  });
+  check(
+    location(mismatch).startsWith("/login/reset?error=The+two+passwords"),
+    "mismatched passwords are refused",
+    location(mismatch),
+  );
+  const short = await resetter.form("/auth/reset", {
+    password: "short",
+    confirm: "short",
+  });
+  check(
+    location(short).startsWith("/login/reset?error=Use+at+least+8"),
+    "a short password is refused",
+    location(short),
+  );
+  const saved = await resetter.form("/auth/reset", {
+    password: newPassword,
+    confirm: newPassword,
+  });
+  check(
+    location(saved).startsWith("/login?message=Your+password+was+changed"),
+    "the new password is saved and sends people back to sign in",
+    location(saved),
+  );
+  check(
+    (await resetter.go("/api/studio")).status === 401,
+    "saving the new password signs the resetting browser out",
+  );
+  const reused = await fetch(reset.link, { redirect: "manual" });
+  const reusedAt = await new Browser().go(location(reused));
+  check(
+    location(reusedAt) ===
+      `/login?${new URLSearchParams({ error: LINK_EXPIRED })}`,
+    "a used reset link explains that it expired",
+    location(reusedAt),
+  );
+  const old = await new Browser().form("/auth/signin", {
+    email: alice.email,
+    password: alice.password,
+  });
+  check(
+    location(old).startsWith("/login?error=That+email+and+password"),
+    "the old password no longer signs in",
+    location(old),
+  );
+  const back = await signIn(alice.email, newPassword);
+  const kept = await (await back.browser.go("/api/studio")).json();
+  check(
+    kept.settings?.email === alice.email &&
+      kept.posts?.some((p: { id: string }) => p.id === post.id) &&
+      kept.assets?.some((a: { id: string }) => a.id === asset?.id),
+    "with the new password the account keeps its slideshow and image",
+  );
+
+  // A link opened in another browser can't be used: half its proof is in
+  // the cookies of the browser that asked.
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  await new Browser().form("/auth/forgot", { email: alice.email });
+  const elsewhere = await fetch(
+    (await emailLink(mailpit, alice.email, "Reset")).link,
+    { redirect: "manual" },
+  );
+  const stray = await new Browser().go(location(elsewhere));
+  check(
+    location(stray) ===
+      `/login?${new URLSearchParams({ error: LINK_OTHER_BROWSER })}`,
+    "a reset link opened in another browser says to use the asking browser",
+    location(stray),
+  );
+  const nobody = new Browser();
+  const expiredPage = await nobody.go("/login/reset");
+  check(
+    expiredPage.status === 200 &&
+      (await expiredPage.text()).includes("This link has expired"),
+    "the new-password form without a reset session offers a new link",
+  );
+  const noSession = await nobody.form("/auth/reset", {
+    password: newPassword,
+    confirm: newPassword,
+  });
+  check(
+    location(noSession).startsWith("/login/forgot?error="),
+    "saving a password without a reset session is refused",
+    location(noSession),
+  );
+}
 
 console.log(
   failures ? `\n${failures} check(s) failed.` : "\nAll checks passed.",
