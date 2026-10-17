@@ -446,12 +446,16 @@ test("TikTok errors say whether a request certainly did nothing", async () => {
     ],
     [
       "a timeout",
+      // AbortSignal.timeout() doesn't keep Node's event loop alive, so the
+      // fake holds it open the way a real socket would until the abort.
       ({ init }) =>
-        new Promise((_, reject) =>
-          init.signal!.addEventListener("abort", () =>
-            reject(init.signal!.reason),
-          ),
-        ),
+        new Promise((_, reject) => {
+          const socket = setInterval(() => {}, 1000);
+          init.signal!.addEventListener("abort", () => {
+            clearInterval(socket);
+            reject(init.signal!.reason);
+          });
+        }),
       { code: "timeout", definite: false },
     ],
   ];
