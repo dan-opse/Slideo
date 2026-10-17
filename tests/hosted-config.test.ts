@@ -112,7 +112,7 @@ test("an unreachable or unprovisioned project is reported, not replaced", async 
   };
   await assert.rejects(
     db.checkSchema(older),
-    /schema version 0; this release needs 1/,
+    new RegExp(`schema version 0; this release needs ${db.SCHEMA_VERSION}`),
   );
   const current: import("../src/lib/db").Backend = {
     call: async <T>() => db.SCHEMA_VERSION as T,

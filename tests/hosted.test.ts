@@ -455,6 +455,8 @@ test(
         ["slideo_state", { p_user: alice!.id, p_since: "2000-01-01" }],
         ["slideo_list", { p_user: bob!.id, p_kind: "post" }],
         ["slideo_ai_usage", { p_user: alice!.id, p_since: "2000-01-01" }],
+        // The TikTok worker's query spans every account.
+        ["slideo_due_deliveries", { p_now: "9999-12-31", p_limit: 200 }],
         [
           "slideo_commit",
           {

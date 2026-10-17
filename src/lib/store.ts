@@ -472,6 +472,14 @@ export async function assetInUse(id: string) {
     if (json.includes(quoted)) return true;
   return call<boolean>("slideo_asset_in_use", { p_asset: id });
 }
+// Deliveries due by `at` in every account, oldest first: the TikTok worker's
+// only query that isn't scoped to one account.
+export async function dueDeliveries(at: Date, limit: number) {
+  return rpc<{ user_id: string; id: string }[]>("slideo_due_deliveries", {
+    p_now: at.toISOString(),
+    p_limit: limit,
+  });
+}
 export async function dailyUsage() {
   const used = await call<number>("slideo_ai_usage", {
     p_since: now().slice(0, 10),

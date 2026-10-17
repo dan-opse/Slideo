@@ -4,12 +4,20 @@ import { randomUUID } from "node:crypto";
 export function redact(text: string) {
   let clean = text
     .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, "[redacted]")
+    // TikTok access, refresh and client tokens, and signed media links.
+    .replace(/\b(act|rft|clt)\.[A-Za-z0-9_.!*~-]{8,}/g, "[redacted]")
+    .replace(/(\/api\/tiktok\/media\/)[^/\s"']+/g, "$1[redacted]")
     .replace(/\b(Bearer|Basic)\s+[^\s"',]+/gi, "$1 [redacted]")
     .replace(
       /\b(api[-_]?key|authorization|password|secret|token)(["']?\s*[:=]\s*["']?)[^\s"',}]+/gi,
       "$1$2[redacted]",
     );
-  for (const value of [process.env.OPENAI_API_KEY])
+  for (const value of [
+    process.env.OPENAI_API_KEY,
+    process.env.TIKTOK_CLIENT_SECRET,
+    process.env.TIKTOK_ENCRYPTION_KEY,
+    process.env.CRON_SECRET,
+  ])
     if (value && value.length >= 8)
       clean = clean.split(value).join("[redacted]");
   return clean;
