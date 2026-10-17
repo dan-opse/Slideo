@@ -61,6 +61,9 @@ const labels: Record<string, string> = {
   label: "Label",
   styleColor: "Style color",
   roundness: "Roundness",
+  delivery: "How it gets to TikTok",
+  mode: "How it gets to TikTok",
+  accountId: "TikTok account",
 };
 const roles: Record<string, string> = {
   hook: "Hook",

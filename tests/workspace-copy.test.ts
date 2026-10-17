@@ -18,11 +18,18 @@ const settings = (
   usedToday: 0,
   hosted: false,
   email: null,
+  tiktok: {
+    available: false,
+    reason: "Available when the studio is hosted.",
+    accounts: [],
+  },
   ...more,
 });
 // The settings page as plain text.
 const page = (s: StudioState["settings"]) =>
-  renderToStaticMarkup(createElement(SettingsView, { settings: s }))
+  renderToStaticMarkup(
+    createElement(SettingsView, { settings: s, onDisconnectTikTok: () => {} }),
+  )
     .replace(/<[^>]+>/g, " ")
     .replace(/&#x27;|&rsquo;/g, "’")
     .replace(/\s+/g, " ");

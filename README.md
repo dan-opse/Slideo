@@ -19,7 +19,7 @@ A hosted studio has accounts: people sign up with an email and password, and eac
 
 1. **Create or select a Supabase project.**
 2. **Turn on the Data API** (**Project Settings → Data API**), with `public` among the exposed schemas. You can leave automatic exposure of new tables off: the setup script grants exactly what the studio needs.
-3. **Install the schema once.** Open **SQL Editor → New query**, paste the contents of [`supabase/migrations/20261014013833_slideo_api.sql`](supabase/migrations/20261014013833_slideo_api.sql), and run it. (With the Supabase CLI linked to the project, `supabase db push` does the same.) It creates the tables, the `slideo_*` functions the studio calls, and the two private buckets. Running it again is safe: it adds what is missing and never removes data. A project set up by an earlier preview of this branch upgrades the same way, keeping its rows.
+3. **Install the schema.** Open **SQL Editor → New query** and run every file in [`supabase/migrations`](supabase/migrations), in order: paste one file's contents, run it, then the next. (With the Supabase CLI linked to the project, `supabase db push` does the same.) They create the tables, the `slideo_*` functions the studio calls, and the two private buckets. Running them again is safe: they add what is missing and never remove data. When an update adds a migration file, run the new file the same way before deploying the update; until then the studio answers "not fully set up" and logs which schema version it needs.
 4. **Configure sign-in.** In **Authentication → URL Configuration**, set the Site URL to your Vercel domain and add `https://<your-domain>/auth/confirm` (and your preview domains' `/auth/confirm`) to the redirect URLs. Sign-up confirmations and password reset links both return there, so there is nothing more to add for password recovery. Before anyone outside your Supabase team signs up, set up your own email sender; see "Email and password recovery" below.
 5. **Add three environment variables in Vercel** (all from **Project Settings → API Keys**; see `.env.example`), plus `OPENAI_API_KEY` if you want AI writing:
    - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: public, used by browsers to sign in.
@@ -121,6 +121,8 @@ npm run build
 supabase start
 npm run test:supabase
 ```
+
+`supabase start` applies the migrations when it creates the stack. If your stack was already running when a new migration arrived, apply it with `supabase migration up --local`.
 
 That run also includes `tests/hosted.test.ts`, which signs in two accounts and checks uploads, a package over 20 MB, account isolation, and that a browser's own session can't reach the tables, functions, or buckets.
 

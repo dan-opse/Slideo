@@ -157,6 +157,15 @@ export const postSchema = z.object({
   notes: z.string().max(1000),
   slides: z.array(slideSchema).min(1).max(20),
   flags: z.array(z.string().max(500)).max(20),
+  // How the approved slides reach TikTok; missing means manual export. It is
+  // content, so changing it needs a new approval. No default: posts saved
+  // before inbox delivery keep their exact content and approval hashes.
+  delivery: z
+    .object({
+      mode: z.literal("tiktok_inbox"),
+      accountId: z.string().min(1).max(100), // a tiktok_account id
+    })
+    .optional(),
 });
 export type PostContent = z.infer<typeof postSchema>;
 const count = z
@@ -196,11 +205,57 @@ export type Asset = {
   // Removed from the library; the file stays for revisions that still use it.
   removedAt?: string;
 };
+// A TikTok account connected through Login Kit. Safe to send to the browser:
+// its tokens are a separate, sealed tiktok_token record that never is.
+export type TikTokAccount = {
+  id: string;
+  // One record per TikTok open_id per Slideo account.
+  openId: string;
+  displayName: string;
+  // Needs the user.info.profile scope; used to build post links.
+  username?: string;
+  status: "connected" | "reconnect_needed" | "disconnected";
+  scopes: string[];
+  connectedAt: string;
+  updatedAt: string;
+};
+export type DeliveryState =
+  | "scheduled" // waiting for dueAt
+  | "held" // can't send yet (pending cap, reconnect needed); reason in `error`
+  | "sending" // claimed by a worker; nextAt is the lease expiry
+  | "processing" // upload accepted; TikTok is fetching the images
+  | "in_inbox" // in the user's TikTok inbox, waiting for them to post
+  | "posted" // posted from the inbox; may still wait for the public post id
+  | "failed" // stays failed until the user retries
+  | "unknown" // the upload may or may not have reached TikTok; the user decides
+  | "expired" // in the inbox 7 days without being posted
+  | "cancelled"; // revision replaced, post deleted, or tracking stopped
+// One approved revision on its way to a TikTok inbox.
+export type Delivery = {
+  id: string; // `${postId}-r${revision}`
+  postId: string;
+  revision: number;
+  accountId: string;
+  state: DeliveryState;
+  // ISO times from toISOString(): the due query compares them as text.
+  dueAt: string;
+  nextAt: string | null; // when the worker should look next; null = nothing to do
+  attempts: number;
+  publishId?: string;
+  sentAt?: string;
+  inboxAt?: string;
+  postedAt?: string;
+  postIds?: string[];
+  error?: { code: string; message: string; retryable: boolean };
+  createdAt: string;
+  updatedAt: string;
+};
 export type StudioState = {
   brands: Brand[];
   formats: Format[];
   posts: Post[];
   assets: Asset[];
+  deliveries: Delivery[];
   settings: {
     aiReady: boolean;
     model: string;
@@ -209,5 +264,13 @@ export type StudioState = {
     // Hosted studios have signed-in accounts; local ones have a single user.
     hosted: boolean;
     email: string | null;
+    tiktok: {
+      available: boolean;
+      // Why it isn't, for the owner.
+      reason?: string;
+      // The studio's main address: TikTok is connected from there.
+      appUrl?: string;
+      accounts: TikTokAccount[];
+    };
   };
 };

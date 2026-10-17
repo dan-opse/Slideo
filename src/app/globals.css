@@ -945,6 +945,37 @@ nav button svg {
   text-align: right;
   overflow-wrap: anywhere;
 }
+/* Connected TikTok accounts, one row each. */
+.tiktok-accounts {
+  list-style: none;
+  margin: 0 0 22px;
+  padding: 0;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.tiktok-accounts li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+}
+.tiktok-accounts li > div:first-child {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.tiktok-account-actions {
+  display: flex;
+  gap: 16px;
+}
+.settings-card .tiktok-note {
+  display: block;
+  margin-top: 14px;
+}
 .loading {
   height: 100vh;
   display: flex;

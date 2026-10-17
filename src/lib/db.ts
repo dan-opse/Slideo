@@ -25,6 +25,8 @@ const ARGS = {
   slideo_ai_usage: { p_user: "text", p_since: "text" },
   slideo_state: { p_user: "text", p_since: "text" },
   slideo_commit: { p_user: "text", p_expected: "bigint", p_changes: "jsonb" },
+  // The TikTok worker's only query across accounts.
+  slideo_due_deliveries: { p_now: "text", p_limit: "integer" },
 } as const;
 export type DbFunction = keyof typeof ARGS;
 export type Backend = {
@@ -33,7 +35,7 @@ export type Backend = {
 };
 
 // The slideo_schema_version() the migrations in this release install.
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 // An error the database raised, with its SQLSTATE. The slideo functions use
 // SL400, SL403, SL409 and SL413 for changes they refuse.
