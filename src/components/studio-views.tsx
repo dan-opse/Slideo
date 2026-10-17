@@ -15,9 +15,16 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import type { Brand, Format, Post, StudioState } from "@/lib/schema";
+import type {
+  Brand,
+  Format,
+  Post,
+  StudioState,
+  TikTokAccount,
+} from "@/lib/schema";
 import { plural } from "@/lib/defaults";
 import { SlideImage, statusLabel } from "./studio-ui";
+import { TikTokCard } from "./tiktok-settings";
 
 export type View =
   | "Overview"
@@ -275,8 +282,10 @@ export function BrandGrid({
 
 export function SettingsView({
   settings,
+  onDisconnectTikTok,
 }: {
   settings: StudioState["settings"];
+  onDisconnectTikTok: (account: TikTokAccount) => void;
 }) {
   // Only text from a request you make reaches OpenAI.
   const ai = settings.aiReady
@@ -370,6 +379,7 @@ export function SettingsView({
           applies separately.
         </small>
       </section>
+      <TikTokCard tiktok={settings.tiktok} onDisconnect={onDisconnectTikTok} />
       <section className="settings-card">
         <h2>What’s in this build</h2>
         <p>

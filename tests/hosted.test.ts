@@ -11,10 +11,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import JSZip from "jszip";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 import type { Post, StudioState } from "../src/lib/schema";
 import { closeTestDatabase, localStack, onSupabase, sql } from "./database";
+import { adminClient, deleteUsers, signedInUser, type User } from "./sessions";
 
 const skip = onSupabase ? false : "needs the local Supabase stack";
 const stack = onSupabase ? localStack() : undefined;
@@ -38,69 +38,13 @@ const { PUT: uploadRoute } = await import("../src/app/api/upload/[id]/route");
 const store = await import("../src/lib/store");
 const { NextRequest } = await import("next/server");
 
-const admin = stack
-  ? createClient(stack.API_URL, stack.SECRET_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
-  : undefined;
-type User = {
-  id: string;
-  email: string;
-  cookie: string;
-  // What a browser holding this session could call directly.
-  client: SupabaseClient;
-};
-const users: User[] = [];
+const admin = stack ? adminClient() : undefined;
 after(async () => {
-  for (const user of users) await admin!.auth.admin.deleteUser(user.id);
+  if (stack) await deleteUsers();
   await store.closeStore();
   await closeTestDatabase();
   rmSync(folder, { recursive: true, force: true });
 });
-
-// A confirmed account, signed in the way the studio's sign-in route does:
-// the session lands in cookies that later requests carry.
-async function account(name: string): Promise<User> {
-  const email = `${name}-${Date.now()}@example.com`,
-    password = `pw-${randomBytes(9).toString("hex")}`;
-  const created = await admin!.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-  });
-  assert.ifError(created.error);
-  const jar = new Map<string, string>();
-  const session = createServerClient(stack!.API_URL, stack!.PUBLISHABLE_KEY, {
-    cookies: {
-      getAll: () => [...jar].map(([name, value]) => ({ name, value })),
-      setAll: (list) =>
-        list.forEach(({ name, value }) =>
-          value ? jar.set(name, value) : jar.delete(name),
-        ),
-    },
-  });
-  const { data, error } = await session.auth.signInWithPassword({
-    email,
-    password,
-  });
-  assert.ifError(error);
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.ok(jar.size, "the sign-in set session cookies");
-  const client = createClient(stack!.API_URL, stack!.PUBLISHABLE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: {
-      headers: { Authorization: `Bearer ${data.session!.access_token}` },
-    },
-  });
-  const user = {
-    id: data.user!.id,
-    email,
-    cookie: [...jar].map(([name, value]) => `${name}=${value}`).join("; "),
-    client,
-  };
-  users.push(user);
-  return user;
-}
 
 const site = "http://localhost:3000";
 const headersFor = (user?: User) => ({
@@ -165,8 +109,8 @@ const photo = (color: string) =>
     .jpeg()
     .toBuffer();
 
-const alice = skip ? undefined : await account("alice");
-const bob = skip ? undefined : await account("bob");
+const alice = skip ? undefined : await signedInUser("alice");
+const bob = skip ? undefined : await signedInUser("bob");
 
 test(
   "a hosted studio refuses requests without a session",

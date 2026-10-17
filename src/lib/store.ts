@@ -9,13 +9,16 @@ import {
   type DbFunction,
 } from "./db";
 import { hosted, LOCAL_USER, type Account } from "./auth";
+import { tiktokAvailability } from "./tiktok";
 import type {
   Asset,
   Brand,
+  Delivery,
   Format,
   Post,
   PostContent,
   StudioState,
+  TikTokAccount,
 } from "./schema";
 export { dataDir } from "./db";
 
@@ -196,13 +199,24 @@ const missing: Record<string, string> = {
   format: "That format no longer exists. Reload the studio.",
   post: "That slideshow no longer exists. Reload the studio.",
   asset: "That image is not in your library. Choose another image.",
+  tiktok_account:
+    "That TikTok account isn't in this studio. Reload the studio.",
+  delivery: "That TikTok delivery no longer exists. Reload the studio.",
 };
-export async function get<T>(kind: string, id: string): Promise<T> {
+// A record, or null when there is none.
+export async function find<T>(kind: string, id: string): Promise<T | null> {
   const tx = current().tx,
     key = `${kind}/${id}`;
-  const found = tx?.entities.has(key)
-    ? tx.entities.get(key) && (JSON.parse(tx.entities.get(key)!) as T)
-    : await call<T | null>("slideo_get", { p_kind: kind, p_id: id });
+  if (tx?.entities.has(key)) {
+    const json = tx.entities.get(key);
+    return json ? (JSON.parse(json) as T) : null;
+  }
+  return (
+    (await call<T | null>("slideo_get", { p_kind: kind, p_id: id })) ?? null
+  );
+}
+export async function get<T>(kind: string, id: string): Promise<T> {
+  const found = await find<T>(kind, id);
   if (!found) throw new StudioError(missing[kind] ?? "Not found.", 404);
   return found;
 }
@@ -502,11 +516,21 @@ export async function updateAiAttempt(
   await write({ op: "ai_update", id, status, usage });
 }
 export async function state(): Promise<StudioState> {
-  const { brands, formats, posts, assets, usedToday } = await call<{
+  const {
+    brands,
+    formats,
+    posts,
+    assets,
+    deliveries,
+    tiktokAccounts,
+    usedToday,
+  } = await call<{
     brands: Brand[];
     formats: Format[];
     posts: Post[];
     assets: Asset[];
+    deliveries: Delivery[];
+    tiktokAccounts: TikTokAccount[];
     usedToday: number;
   }>("slideo_state", { p_since: now().slice(0, 10) });
   return {
@@ -514,6 +538,7 @@ export async function state(): Promise<StudioState> {
     formats,
     posts,
     assets,
+    deliveries,
     settings: {
       aiReady: !!process.env.OPENAI_API_KEY,
       model: process.env.OPENAI_MODEL || "gpt-5.6-luna",
@@ -521,6 +546,7 @@ export async function state(): Promise<StudioState> {
       usedToday: Number(usedToday),
       hosted: hosted(),
       email: account().email,
+      tiktok: { ...tiktokAvailability(), accounts: tiktokAccounts },
     },
   };
 }

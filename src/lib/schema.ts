@@ -255,6 +255,7 @@ export type StudioState = {
   formats: Format[];
   posts: Post[];
   assets: Asset[];
+  deliveries: Delivery[];
   settings: {
     aiReady: boolean;
     model: string;
@@ -263,5 +264,13 @@ export type StudioState = {
     // Hosted studios have signed-in accounts; local ones have a single user.
     hosted: boolean;
     email: string | null;
+    tiktok: {
+      available: boolean;
+      // Why it isn't, for the owner.
+      reason?: string;
+      // The studio's main address: TikTok is connected from there.
+      appUrl?: string;
+      accounts: TikTokAccount[];
+    };
   };
 };

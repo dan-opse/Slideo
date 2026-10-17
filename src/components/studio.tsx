@@ -21,7 +21,14 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import type { Asset, Brand, Format, Post, StudioState } from "@/lib/schema";
+import type {
+  Asset,
+  Brand,
+  Format,
+  Post,
+  StudioState,
+  TikTokAccount,
+} from "@/lib/schema";
 import { blankFormat, defaultBrandId, libraryAssets } from "@/lib/defaults";
 import { loadStudio, studioAction } from "./request";
 import { IconButton, SlideoMark, workspaceLabels } from "./studio-ui";
@@ -46,6 +53,7 @@ import {
 import { CreateSlideshowModal } from "./create-slideshow-modal";
 import { CalendarView } from "./calendar-view";
 import { Results } from "./results-view";
+import { TikTokDisconnectModal, takeTikTokNotice } from "./tiktok-settings";
 
 export default function Studio() {
   const [state, setState] = useState<StudioState | null>(null),
@@ -67,7 +75,10 @@ export default function Studio() {
     [formatEdit, setFormatEdit] = useState<Format | null>(null),
     [upload, setUpload] = useState(false),
     [assetEdit, setAssetEdit] = useState<Asset | null>(null),
-    [assetDelete, setAssetDelete] = useState<AssetDeletion | null>(null);
+    [assetDelete, setAssetDelete] = useState<AssetDeletion | null>(null),
+    [tiktokDisconnect, setTiktokDisconnect] = useState<TikTokAccount | null>(
+      null,
+    );
   const refresh = useCallback(async () => {
     setState(await loadStudio());
   }, []);
@@ -75,7 +86,14 @@ export default function Studio() {
     let alive = true;
     loadStudio()
       .then((data) => {
-        if (alive) setState(data);
+        if (!alive) return;
+        setState(data);
+        // TikTok's sign-in returns to /?tiktok=<outcome>.
+        const notice = takeTikTokNotice(data.settings.tiktok.appUrl);
+        if (!notice) return;
+        setView("Settings");
+        if (notice.ok) setToast(notice.message);
+        else setError(notice.message);
       })
       .catch((e: Error) => {
         if (alive) setError(e.message);
@@ -127,7 +145,12 @@ export default function Studio() {
   );
   // Errors from a form are shown inside its dialog, not behind the backdrop.
   const pageModalOpen =
-    create || !!brandEdit || upload || !!assetEdit || !!assetDelete;
+    create ||
+    !!brandEdit ||
+    upload ||
+    !!assetEdit ||
+    !!assetDelete ||
+    !!tiktokDisconnect;
   const navigate = (v: View) => {
     setView(v);
     setFilter("all");
@@ -374,7 +397,15 @@ export default function Studio() {
               }
             />
           )}
-          {view === "Settings" && <SettingsView settings={state.settings} />}
+          {view === "Settings" && (
+            <SettingsView
+              settings={state.settings}
+              onDisconnectTikTok={(account) => {
+                setError("");
+                setTiktokDisconnect(account);
+              }}
+            />
+          )}
           <footer className="page-footer">
             <SlideoMark size={14} />
             <span>Nothing ships without your approval.</span>
@@ -537,6 +568,26 @@ export default function Studio() {
               })) as { deleted: Asset[]; kept: Asset[] };
               setAssetDelete(null);
               setToast(deletionMessage(result));
+            })
+          }
+        />
+      )}
+      {tiktokDisconnect && (
+        <TikTokDisconnectModal
+          account={tiktokDisconnect}
+          busy={busy}
+          error={error}
+          onClose={() => {
+            setTiktokDisconnect(null);
+            setError("");
+          }}
+          onConfirm={() =>
+            run(async () => {
+              await studioAction("tiktokDisconnect", {
+                id: tiktokDisconnect.id,
+              });
+              setTiktokDisconnect(null);
+              setToast("TikTok disconnected.");
             })
           }
         />

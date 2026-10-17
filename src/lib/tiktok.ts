@@ -8,6 +8,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { hosted } from "./auth";
+import { logUnexpected } from "./log";
 
 // TikTok inbox delivery: Login Kit connects an account, and the Content
 // Posting API's MEDIA_UPLOAD mode puts approved slides in that account's
@@ -101,15 +102,20 @@ export function tiktokSettingsProblem(env: Env = process.env) {
 export function tiktokConfig(): TikTokConfig | null {
   return hosted() ? tiktokSettings() : null;
 }
-export function tiktokAvailability(): { available: boolean; reason?: string } {
+export function tiktokAvailability(): {
+  available: boolean;
+  reason?: string;
+  appUrl?: string;
+} {
   if (!hosted())
     return { available: false, reason: "Available when the studio is hosted." };
-  if (!tiktokSettings())
+  const config = tiktokSettings();
+  if (!config)
     return {
       available: false,
       reason: "TikTok isn't set up on this studio yet.",
     };
-  return { available: true };
+  return { available: true, appUrl: config.appUrl };
 }
 
 const b64 = (data: Buffer) => data.toString("base64");
@@ -223,6 +229,24 @@ export class TikTokError extends Error {
     this.logId = detail.logId;
     this.definite = detail.definite ?? true;
   }
+}
+// Logs a failed TikTok call with what TikTok support asks for: its error
+// code, the HTTP status and the log_id. Callers never pass tokens, codes or
+// media links in the context.
+export function logTikTok(
+  operation: string,
+  error: unknown,
+  context: Record<string, string | number | undefined> = {},
+) {
+  const answer =
+    error instanceof TikTokError
+      ? {
+          tiktokCode: error.code,
+          httpStatus: error.httpStatus || undefined,
+          logId: error.logId,
+        }
+      : {};
+  return logUnexpected(operation, error, { ...context, ...answer });
 }
 
 // user.info.profile supplies the username for post links and is optional;

@@ -46,6 +46,7 @@ import {
   generateHooks,
 } from "@/lib/ai";
 import { readWebsite } from "@/lib/website";
+import { disconnect } from "@/lib/tiktok-accounts";
 import { photoFont } from "@/lib/photo-render";
 import { slideStructure, templateSlide } from "@/lib/format-template";
 import { describeIssues } from "@/lib/errors";
@@ -79,6 +80,7 @@ const ACTIONS = new Set([
   "restore",
   "publish",
   "metrics",
+  "tiktokDisconnect",
 ]);
 
 async function readJson(req: NextRequest) {
@@ -619,6 +621,8 @@ async function handle(action: string, input: Record<string, unknown>) {
       }),
     );
   }
+  if (action === "tiktokDisconnect")
+    return NextResponse.json(await disconnect(id));
   if (action === "metrics") {
     const data = metricsSchema.parse(input.data);
     return NextResponse.json(

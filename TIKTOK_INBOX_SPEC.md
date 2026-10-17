@@ -209,7 +209,8 @@ Update README step 3 to say "run every file in `supabase/migrations`, in order".
 **`GET /api/tiktok/connect`** (`src/app/api/tiktok/connect/route.ts`):
 - Call `authorize(req)`. Navigation from the studio is same-origin, so it passes. Answer 503 if the feature is unavailable.
 - Create `state` from 32 random bytes. Set the cookie `slideo_tiktok_oauth` to a signed `{ state, user: account.id, exp: now + 10 min }`, with `HttpOnly; Secure; SameSite=Lax; Path=/api/tiktok`. It must be `Lax`, not `Strict`, or the cookie won't come back from TikTok's redirect.
-- Answer 303 to the TikTok authorize URL. Pass `disable_auto_auth=1` when reconnecting so the user can choose a different account.
+- If the request's host isn't `APP_URL`'s host, answer 303 to `/?tiktok=wrong_host` and set no cookie. TikTok only returns people to `APP_URL`, where the state cookie and the session must be.
+- Answer 303 to the TikTok authorize URL. Pass `disable_auto_auth=1` when reconnecting (`?reconnect=1`) so the user can choose a different account.
 
 **`GET /api/tiktok/callback`**:
 - **Do not call `authorize()`.** TikTok's redirect arrives with `sec-fetch-site: cross-site` and would be refused. Instead:
@@ -218,14 +219,15 @@ Update README step 3 to say "run every file in `supabase/migrations`, in order".
   - Compare `state` in constant time.
   - Clear the cookie on every outcome.
   - The CSRF protection here is the state check.
-- If the callback carries `error`, redirect to the studio with a readable notice. Never echo `error_description` into HTML unescaped.
+- If the callback carries `error`, redirect to the studio with a readable notice. Never show `error_description`: anyone can put text in the link.
 - Exchange the code. Require `video.upload` among the granted scopes; otherwise show "Allow uploads to connect TikTok". Then fetch `/v2/user/info/?fields=open_id,display_name,username`.
-- In one `transaction()`, upsert `tiktok_account` matched by `openId`, so reconnecting the same TikTok account keeps its id and its deliveries. Write the sealed `tiktok_token` and `audit("tiktok.connected", id)`. Move that account's deliveries that are `held` with code `reconnect_needed` back to `scheduled` with `nextAt = now`.
-- Answer 303 to `/` (or to wherever Settings lives) with a success flag the UI turns into a toast.
+- In one `transaction()`, upsert `tiktok_account` matched by `openId`, so reconnecting the same TikTok account keeps its id and its deliveries. Write the sealed `tiktok_token` and `audit("tiktok.connected", id)`. Move that account's deliveries that are `held` with code `reconnect_needed` back to `scheduled`, with `nextAt` set to the later of now and `dueAt`, so a delivery held before its time isn't sent early.
+- Revoke tokens TikTok issued that Slideo won't keep (a missing `video.upload` grant, a failed account lookup or save), unless this Slideo account already has the same `open_id` connected: a revoke may end TikTok's whole authorization, and that connection with it (§10). Don't revoke the token a reconnect replaces, for the same reason.
+- Answer 303 to `/?tiktok=<outcome>`: `connected`, `denied` (`error=access_denied`), `scope`, `expired` (any state check failed), `failed`, or `unavailable`. Without a session, answer 303 to `/login?error=…`. The studio turns the outcome into a toast or an error from a fixed message map, opens Settings, and removes the parameter with `history.replaceState`.
 
 **Disconnect** is a new studio action, `tiktokDisconnect { id }`. It revokes the token (best effort, outside the transaction), deletes `tiktok_token`, and sets the account to `disconnected`. It moves that account's `scheduled` deliveries to `held` with code `reconnect_needed`, and audits `tiktok.disconnected`.
 
-**Getting a usable access token** (`accessToken(accountId)`): if it expires within 10 minutes, refresh outside a transaction, then save the new pair inside one. If the commit finds that another worker refreshed first, use the stored token instead. **Always store the returned refresh token.** On `invalid_grant`, or a refresh token past its expiry, set the account to `reconnect_needed`, audit it, and throw a `reconnect_needed` error that callers map to `held`.
+**Getting a usable access token** (`accessToken(accountId)`): if it expires within 10 minutes, refresh outside a transaction, then save the new pair inside one. If the commit finds that another worker refreshed first, use the stored token instead. **Always store the returned refresh token.** A refresh that fails after another request saved a newer pair (TikTok may have rotated the refresh token) uses that pair too. On `invalid_grant`, a refresh token past its expiry, or a seal that won't open, set the account to `reconnect_needed`, audit it, and throw a `reconnect_needed` error that callers map to `held`. After a refresh failure that isn't definite, keep using the current token while it's still valid.
 
 ### 5.5 Approval schedules a delivery; edits cancel it
 
@@ -337,10 +339,11 @@ A delay of a few minutes is acceptable; the UI says "around" the planned time. V
 
 Use the existing components and copy style: short, plain sentences in the second person. Don't add Slideo branding inside slides; TikTok forbids watermarks and promotional overlays.
 
-- **`StudioState`** (`schema.ts`, `store.ts` `state()`): add `deliveries: Delivery[]` and `settings.tiktok: { available: boolean; reason?: string; accounts: TikTokAccount[] }`.
+- **`StudioState`** (`schema.ts`, `store.ts` `state()`): add `deliveries: Delivery[]` and `settings.tiktok: { available: boolean; reason?: string; appUrl?: string; accounts: TikTokAccount[] }`. `appUrl` is set when available, so the wrong-host notice can name the studio's main address.
 - **Settings** (`SettingsView`): add a TikTok card.
   - Unavailable: "Available when the studio is hosted" when local, or "TikTok isn't set up on this studio yet" when configuration is missing.
-  - Available: a **Connect TikTok** link to `/api/tiktok/connect`, then each account's display name and `@username`, its status, and **Reconnect** and **Disconnect** buttons.
+  - Available: a **Connect TikTok** link to `/api/tiktok/connect`, then each account's display name and `@username`, its status, and **Reconnect** and **Disconnect** buttons. Disconnect asks for confirmation first.
+  - Accounts connected before the feature became unavailable stay listed, with **Disconnect** only.
   - Change the "Publishing" row to "Manual export or TikTok inbox, with approval".
 - **Queue sheet** (`editor-sheet.tsx`, `sheet === "queue"`): add a choice, "How it gets to TikTok":
   - "I'll download and post it" (the default; removes `delivery`);
@@ -425,7 +428,7 @@ Make each milestone its own commit or commits. Each should be releasable: with t
 
 - **`post_info.title`**: Slideo's `title` is an internal name. Send no title (current plan), the first slide's hook, or an editable field? Ask the owner before milestone 5 if a real upload shows the empty title is a problem.
 - **`is_aigc`** (the AI-generated label): the docs don't say whether it is allowed with `MEDIA_UPLOAD`. Leave it out until that is checked; TikTok's own composer can set disclosures.
-- Whether the unaudited private-account restriction applies to inbox uploads. Whether the "5 pending" count drops when the user posts, or only after 24 hours. The exact public URL path for photo posts. Whether web Login Kit now expects PKCE. Webhook signature verification, so polling can later be replaced.
+- Whether the unaudited private-account restriction applies to inbox uploads. Whether the "5 pending" count drops when the user posts, or only after 24 hours. The exact public URL path for photo posts. Whether web Login Kit now expects PKCE. Whether a revoke ends only that token or TikTok's whole authorization for the app, and whether a new authorization invalidates earlier tokens. This matters when one TikTok account is connected from two Slideo accounts: disconnecting it in one may cut the other, which then moves to `reconnect_needed` on its next TikTok call. Webhook signature verification, so polling can later be replaced.
 - If any of these changes the design, update this document in the same commit.
 
 ## 11. Out of scope

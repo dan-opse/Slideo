@@ -135,7 +135,10 @@ test("the feature is available only on a hosted studio with every setting", asyn
       { NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co" },
       async () => {
         assert.equal(tiktok.tiktokConfig()?.appUrl, "https://slideo.example");
-        assert.deepEqual(tiktok.tiktokAvailability(), { available: true });
+        assert.deepEqual(tiktok.tiktokAvailability(), {
+          available: true,
+          appUrl: "https://slideo.example",
+        });
         await withEnv({ CRON_SECRET: undefined }, () => {
           assert.equal(tiktok.tiktokConfig(), null);
           assert.deepEqual(tiktok.tiktokAvailability(), {
